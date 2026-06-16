@@ -1,5 +1,28 @@
 import React, { useState, useEffect } from 'react';
 
+const Icons = {
+  settings: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  ),
+  info: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="16" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12.01" y2="8" />
+    </svg>
+  ),
+  target: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="6" />
+      <circle cx="12" cy="12" r="2" />
+    </svg>
+  )
+};
+
 export default function AutomationView({ onScheduleSuccess }) {
   const [worksheets, setWorksheets] = useState([]);
   const [selectedWorksheet, setSelectedWorksheet] = useState('');
@@ -254,7 +277,10 @@ export default function AutomationView({ onScheduleSuccess }) {
       <div className="config-grid">
         {/* Settings Card */}
         <div className="card config-card">
-          <h3>⚙️ Cron Sequencer Settings</h3>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.2rem' }}>
+            <span style={{ color: 'var(--text-secondary)', display: 'inline-flex' }}>{Icons.settings}</span>
+            Cron Sequencer Settings
+          </h3>
           <form onSubmit={handleBulkScheduleSubmit} className="modal-form">
             <div className="form-group">
               <label>Select Campaign Series</label>
@@ -353,7 +379,10 @@ export default function AutomationView({ onScheduleSuccess }) {
 
         {/* Status Log Card */}
         <div className="card config-card instructions" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <h3>💡 Automation Instructions</h3>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.2rem' }}>
+            <span style={{ color: 'var(--text-secondary)', display: 'inline-flex' }}>{Icons.info}</span>
+            Automation Instructions
+          </h3>
           <div className="status-log" style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: '1.5', marginTop: '1rem', whiteSpace: 'pre-line' }}>
             {statusLog}
           </div>
@@ -361,7 +390,10 @@ export default function AutomationView({ onScheduleSuccess }) {
 
         {/* Single Post Scheduler Card */}
         <div className="card config-card" id="single-schedule-card">
-          <h3>🎯 Single Post Scheduler</h3>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.2rem' }}>
+            <span style={{ color: 'var(--text-secondary)', display: 'inline-flex' }}>{Icons.target}</span>
+            Single Post Scheduler
+          </h3>
           <form onSubmit={handleSingleScheduleSubmit} className="modal-form">
             <div className="form-group">
               <label>Select Campaign Post</label>
@@ -395,11 +427,11 @@ export default function AutomationView({ onScheduleSuccess }) {
               />
             </div>
             
-            <div style={{ fontSize: '0.85rem', color: 'var(--accent-neon-blue)', lineHeight: '1.4', minHeight: '2.5rem', marginTop: '0.75rem', whiteSpace: 'pre-line' }}>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.4', minHeight: '2.5rem', marginTop: '0.75rem', whiteSpace: 'pre-line' }}>
               {singlePostInfo}
             </div>
 
-            <div className="form-actions" style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifycontent: 'flex-end' }}>
+            <div className="form-actions" style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
               <button
                 type="submit"
                 className="btn primary"
@@ -484,7 +516,7 @@ export default function AutomationView({ onScheduleSuccess }) {
                       ) : (
                         <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
                           {post.db_status === 'Posting'
-                            ? '⚡ Publishing...'
+                            ? 'Publishing...'
                             : (post.sheet_status === 'Posted' ? 'Published' : 'Posting Time Reached')}
                         </span>
                       )}

@@ -1,5 +1,30 @@
 import React, { useState, useEffect } from 'react';
 
+const Icons = {
+  arrowLeft: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: '6px' }}>
+      <line x1="19" y1="12" x2="5" y2="12" />
+      <polyline points="12 19 5 12 12 5" />
+    </svg>
+  ),
+  chevronLeft: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: '4px' }}>
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+  ),
+  chevronRight: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', marginLeft: '4px' }}>
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  ),
+  copy: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: '4px' }}>
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  )
+};
+
 export default function PostPreview({ postId, sourceSheet, rowIndex, onBack }) {
   const [postDetails, setPostDetails] = useState(null);
   const [activeSlideIdx, setActiveSlideIdx] = useState(0);
@@ -99,7 +124,7 @@ export default function PostPreview({ postId, sourceSheet, rowIndex, onBack }) {
       <div style={{ padding: '2.5rem', maxWidth: '1400px', margin: '0 auto', minHeight: '100vh' }}>
         <header className="preview-header">
           <div>
-            <span className="back-link" onClick={onBack}>← Back to Dashboard</span>
+            <span className="back-link" onClick={onBack}>{Icons.arrowLeft} Back to Dashboard</span>
             <h1 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '2.2rem', fontWeight: 800, marginTop: '0.5rem' }}>
               Loading Post Preview...
             </h1>
@@ -119,7 +144,7 @@ export default function PostPreview({ postId, sourceSheet, rowIndex, onBack }) {
       <div style={{ padding: '2.5rem', maxWidth: '1400px', margin: '0 auto', minHeight: '100vh' }}>
         <header className="preview-header">
           <div>
-            <span className="back-link" onClick={onBack}>← Back to Dashboard</span>
+            <span className="back-link" onClick={onBack}>{Icons.arrowLeft} Back to Dashboard</span>
             <h1 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '2.2rem', fontWeight: 800, marginTop: '0.5rem', color: 'var(--error-border)' }}>
               Error Loading Post
             </h1>
@@ -148,7 +173,7 @@ export default function PostPreview({ postId, sourceSheet, rowIndex, onBack }) {
       {/* Header */}
       <header className="preview-header">
         <div>
-          <span className="back-link" onClick={onBack}>← Back to Dashboard</span>
+          <span className="back-link" onClick={onBack}>{Icons.arrowLeft} Back to Dashboard</span>
           <h1 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '2.2rem', fontWeight: 800, marginTop: '0.5rem' }}>
             {postDetails.data?.Topic || postDetails.post_id}
           </h1>
@@ -184,8 +209,9 @@ export default function PostPreview({ postId, sourceSheet, rowIndex, onBack }) {
               className="btn secondary"
               disabled={activeSlideIdx === 0}
               onClick={() => setActiveSlideIdx(prev => prev - 1)}
+              style={{ display: 'flex', alignItems: 'center' }}
             >
-              ◀ Previous
+              {Icons.chevronLeft} Previous
             </button>
             <span className="slide-indicator">
               Slide {slides.length > 0 ? activeSlideIdx + 1 : 0} of {slides.length}
@@ -194,8 +220,9 @@ export default function PostPreview({ postId, sourceSheet, rowIndex, onBack }) {
               className="btn secondary"
               disabled={activeSlideIdx === slides.length - 1 || slides.length === 0}
               onClick={() => setActiveSlideIdx(prev => prev + 1)}
+              style={{ display: 'flex', alignItems: 'center' }}
             >
-              Next ▶
+              Next {Icons.chevronRight}
             </button>
           </div>
 
@@ -219,8 +246,8 @@ export default function PostPreview({ postId, sourceSheet, rowIndex, onBack }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.25rem' }}>Caption & Text Copy</h2>
               <div style={{ position: 'relative' }}>
-                <button className="btn secondary" style={{ padding: '0.4rem 0.8rem' }} onClick={copyCaption}>
-                  📋 Copy
+                <button className="btn secondary" style={{ padding: '0.4rem 0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }} onClick={copyCaption}>
+                  {Icons.copy} Copy
                 </button>
                 <span className={`copy-success-toast ${showToast ? 'show' : ''}`} style={{ position: 'absolute', right: '100%', top: '5px' }}>
                   Copied!

@@ -41,13 +41,13 @@ export default function CampaignView({ posts, onScheduleClick, onPreviewNavigate
   return (
     <section className="content-section active">
       <header className="section-header">
-        <h2>50-Day AI Automation Campaign</h2>
-        <p>Sequential daily posts targeted for the D2C & B2B industries.</p>
+        <h2>50-Day AI Campaign</h2>
+        <p>Sequential daily posts targeted for D2C & B2B automation.</p>
       </header>
 
       <div className="grid-layout">
         {posts.length === 0 ? (
-          <p className="card" style={{ gridColumn: '1/-1' }}>No posts found in this sheet tab.</p>
+          <p className="card" style={{ gridColumn: '1/-1' }}>No posts found.</p>
         ) : (
           posts.map(post => {
             const status = (post.Status || 'Pending').trim();
@@ -62,23 +62,23 @@ export default function CampaignView({ posts, onScheduleClick, onPreviewNavigate
               <div
                 key={post.Post_ID || Math.random()}
                 className="card post-card"
-                style={{ cursor: 'pointer' }}
                 onClick={() => onPreviewNavigate(post.Post_ID, '50DaysCampaign', post.row_index)}
               >
                 <div>
                   <div className="post-card-header">
                     <span className={badgeClass}>{status}</span>
-                    <span className="slide-count-badge">🖼️ {slideUrls.length} Slides</span>
+                    <span className="slide-count-badge">{slideUrls.length} slides</span>
                   </div>
                   <h3>{post.Post_ID || 'Unnamed Post'}</h3>
                   <p className="caption-preview">{post.Caption || 'No caption text'}</p>
                 </div>
                 <div className="post-card-footer">
-                  <span className="topic-label" style={{ fontSize: '0.8rem', color: 'var(--accent-neon-blue)' }}>
+                  <span className="topic-label" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
                     {post.Topic || ''}
                   </span>
                   <button
-                    className="btn primary schedule-trigger-btn"
+                    className="btn secondary"
+                    style={{ padding: '0.45rem 0.85rem' }}
                     disabled={slideUrls.length === 0}
                     onClick={(e) => {
                       e.stopPropagation();

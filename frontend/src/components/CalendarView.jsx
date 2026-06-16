@@ -1,5 +1,18 @@
 import React, { useState, useEffect } from 'react';
 
+const Icons = {
+  chevronLeft: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+  ),
+  chevronRight: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  )
+};
+
 export default function CalendarView({ onPreviewNavigate }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [scheduledJobs, setScheduledJobs] = useState([]);
@@ -94,12 +107,16 @@ export default function CalendarView({ onPreviewNavigate }) {
         </div>
         
         {/* Month Navigation Controls */}
-        <div className="calendar-controls" style={{ display: 'flex', alignItems: 'center', gap: '1rem', background: 'var(--card-bg)', padding: '0.5rem 1rem', borderRadius: '12px', border: '1px solid var(--card-border)' }}>
-          <button className="btn secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.9rem' }} onClick={handlePrevMonth}>◀</button>
-          <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.1rem', minWidth: '140px', textAlign: 'center' }}>
+        <div className="calendar-controls" style={{ display: 'flex', alignItems: 'center', gap: '0.8rem', background: 'var(--card-bg)', padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid var(--card-border)' }}>
+          <button className="btn secondary" style={{ padding: '0.35rem 0.65rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={handlePrevMonth}>
+            {Icons.chevronLeft}
+          </button>
+          <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 600, fontSize: '0.95rem', minWidth: '120px', textAlign: 'center', color: 'var(--text-primary)' }}>
             {monthNames[month]} {year}
           </span>
-          <button className="btn secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.9rem' }} onClick={handleNextMonth}>▶</button>
+          <button className="btn secondary" style={{ padding: '0.35rem 0.65rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={handleNextMonth}>
+            {Icons.chevronRight}
+          </button>
         </div>
       </header>
 
@@ -107,7 +124,7 @@ export default function CalendarView({ onPreviewNavigate }) {
       <div className="card" style={{ padding: '1.5rem', overflowX: 'auto' }}>
         <div className="calendar-container" style={{ minWidth: '700px' }}>
           {/* Days of week headers */}
-          <div className="calendar-weekdays" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textAlign: 'center', fontWeight: 600, color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '1px', paddingBottom: '1rem', borderBottom: '1px solid var(--card-border)' }}>
+          <div className="calendar-weekdays" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textAlign: 'center', fontWeight: 600, color: 'var(--text-secondary)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '1px', paddingBottom: '1rem', borderBottom: '1px solid var(--card-border)' }}>
             <div>Sun</div>
             <div>Mon</div>
             <div>Tue</div>
@@ -148,7 +165,7 @@ export default function CalendarView({ onPreviewNavigate }) {
                         title={tooltipText}
                         onClick={() => onPreviewNavigate(post.post_id, post.source_sheet, post.row_index)}
                       >
-                        {timeStr} | {post.post_id.slice(0, 15)}
+                        {timeStr} | {post.post_id.replace('day_', 'D')}
                       </div>
                     );
                   })}

@@ -61,23 +61,23 @@ export default function QueueView({ posts, onScheduleClick, onPreviewNavigate, i
               <div
                 key={post.Post_ID || Math.random()}
                 className="card post-card"
-                style={{ cursor: 'pointer' }}
                 onClick={() => onPreviewNavigate(post.Post_ID, 'Queue', post.row_index)}
               >
                 <div>
                   <div className="post-card-header">
                     <span className={badgeClass}>{status}</span>
-                    <span className="slide-count-badge">🖼️ {slideUrls.length} Slides</span>
+                    <span className="slide-count-badge">{slideUrls.length} slides</span>
                   </div>
                   <h3>{post.Post_ID || 'Unnamed Post'}</h3>
                   <p className="caption-preview">{post.Caption || 'No caption text'}</p>
                 </div>
                 <div className="post-card-footer">
-                  <span className="topic-label" style={{ fontSize: '0.8rem', color: 'var(--accent-neon-blue)' }}>
+                  <span className="topic-label" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
                     {post.Topic || ''}
                   </span>
                   <button
-                    className="btn primary schedule-trigger-btn"
+                    className="btn secondary"
+                    style={{ padding: '0.45rem 0.85rem' }}
                     disabled={slideUrls.length === 0}
                     onClick={(e) => {
                       e.stopPropagation();
