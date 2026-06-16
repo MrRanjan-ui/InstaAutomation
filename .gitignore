@@ -1,2 +1,37 @@
+# Credentials & secrets
 .env
 gen-lang-client-*.json
+instagram_session.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# Database (auto-created at startup)
+*.db
+
+# Node
+node_modules/
+
+# Build output (rebuilt on deploy)
+dashboard/dist/
+
+# Temporary / pipeline artifacts
+post_temp_meta.json
+post/automation_debug/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Reference documents (not application code)
+*.xlsx
+
+# OS files
+Thumbs.db
+.DS_Store

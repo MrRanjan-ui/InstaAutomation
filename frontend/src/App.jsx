@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
+import SystemDashboard from './components/SystemDashboard';
 import CampaignView from './components/CampaignView';
 import CampaignsDashboard from './components/CampaignsDashboard';
 import CalendarView from './components/CalendarView';
@@ -12,7 +13,7 @@ import ScheduleModal from './components/ScheduleModal';
 import './App.css';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('campaign');
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [config, setConfig] = useState(null);
   const [posts, setPosts] = useState({ campaign_posts: [], random_posts: [] });
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
@@ -154,6 +155,12 @@ export default function App() {
               <span className="alert-text">{errorMsg}</span>
               <button className="alert-close" onClick={() => setErrorMsg('')}>×</button>
             </div>
+          )}
+
+          {activeTab === 'dashboard' && (
+            <SystemDashboard
+              onTabNavigate={setActiveTab}
+            />
           )}
 
           {activeTab === 'campaign' && (

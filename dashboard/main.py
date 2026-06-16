@@ -4,6 +4,8 @@ import json
 import time
 import sqlite3
 import asyncio
+import logging
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional, List
 import requests
@@ -12,7 +14,8 @@ from google.oauth2.service_account import Credentials
 import fastapi
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import cloudinary
 import cloudinary.uploader
@@ -21,10 +24,55 @@ import cloudinary.uploader
 if sys.platform.startswith('win'):
     sys.stdout.reconfigure(encoding='utf-8')
 
+# ─── Structured Logging ───────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger("goran-scheduler")
+
 DB_PATH = "dashboard/scheduler.db"
 ENV_FILE = ".env"
 
-app = FastAPI(title="GoRan AI Instagram Scheduler Dashboard")
+# ─── Lifespan (replaces deprecated on_event) ──────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: validate environment and launch scheduler
+    config = load_env()
+    missing = []
+    for key in ["INSTAGRAM_BUSINESS_ACCOUNT_ID", "INSTAGRAM_ACCESS_TOKEN", "GOOGLE_SHEET_ID"]:
+        if not config.get(key):
+            missing.append(key)
+    if missing:
+        logger.warning(f"Missing environment variables: {', '.join(missing)}. Some features will be disabled.")
+    else:
+        logger.info("All required environment variables are configured.")
+    
+    # Start the background scheduler worker
+    scheduler_task = asyncio.create_task(scheduler_worker())
+    logger.info("Background scheduler worker started.")
+    
+    yield  # Application runs
+    
+    # Shutdown: cancel the scheduler
+    scheduler_task.cancel()
+    try:
+        await scheduler_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("Scheduler worker stopped.")
+
+app = FastAPI(title="GoRan AI Instagram Scheduler Dashboard", lifespan=lifespan)
+
+# ─── CORS Middleware ──────────────────────────────────────────
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ─── Load Environment Configuration ───────────────────────────
 def load_env():
@@ -81,6 +129,7 @@ def get_sheets_client(creds_path):
 
 # ─── Instagram Publisher Logic ────────────────────────────────
 def publish_single_post(image_url: str, caption: str, account_id: str, token: str) -> str:
+    """Publish a single image post. Runs in a thread via asyncio.to_thread."""
     # 1. Create Media Container
     url = f"https://graph.facebook.com/v19.0/{account_id}/media"
     payload = {
@@ -108,6 +157,7 @@ def publish_single_post(image_url: str, caption: str, account_id: str, token: st
     return pub_resp.json().get("id")
 
 def publish_carousel_post(image_urls: List[str], caption: str, account_id: str, token: str) -> str:
+    """Publish a carousel post. Runs in a thread via asyncio.to_thread."""
     # 1. Create individual item containers
     item_ids = []
     for url in image_urls:
@@ -151,7 +201,62 @@ def publish_carousel_post(image_urls: List[str], caption: str, account_id: str, 
     return pub_resp.json().get("id")
 
 # ─── Background Worker ────────────────────────────────────────
+def _sync_publish_job(job_dict, account_id, token, creds_path, sheet_id):
+    """Synchronous publish logic — runs in a thread to avoid blocking the event loop."""
+    job_id = job_dict["id"]
+    post_id = job_dict["post_id"]
+    caption = job_dict["caption"]
+    slide_urls = json.loads(job_dict["slide_urls"])
+    source_sheet = job_dict["source_sheet"]
+    row_index = job_dict["row_index"]
+
+    # Update status to Posting
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE scheduled_posts SET status = 'Posting' WHERE id = ?", (job_id,))
+    conn.commit()
+
+    try:
+        # Publish single image vs. carousel
+        if len(slide_urls) == 1:
+            published_id = publish_single_post(slide_urls[0], caption, account_id, token)
+        else:
+            published_id = publish_carousel_post(slide_urls, caption, account_id, token)
+
+        # Mark database success
+        cursor.execute(
+            "UPDATE scheduled_posts SET status = 'Success', published_id = ? WHERE id = ?",
+            (published_id, job_id)
+        )
+        conn.commit()
+        logger.info(f"Successfully published Job {job_id} (Post {post_id}). Instagram ID: {published_id}")
+
+        # Update Google Sheet status to 'Posted' if credentials available
+        client = get_sheets_client(creds_path)
+        if client and sheet_id and row_index:
+            try:
+                spreadsheet = client.open_by_key(sheet_id)
+                sheet = spreadsheet.worksheet(source_sheet)
+                headers = sheet.row_values(1)
+                if "Status" in headers:
+                    col_idx = headers.index("Status") + 1
+                    sheet.update_cell(row_index, col_idx, "Posted")
+            except Exception as sheet_err:
+                logger.warning(f"Failed to update Google Sheet status for Job {job_id}: {sheet_err}")
+
+    except Exception as ex:
+        logger.error(f"Publish error on Job {job_id}: {ex}")
+        cursor.execute(
+            "UPDATE scheduled_posts SET status = 'Failed', error_message = ? WHERE id = ?",
+            (str(ex), job_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
 async def scheduler_worker():
+    """Background worker that polls for pending posts and publishes them.
+    Uses asyncio.to_thread() so blocking HTTP calls don't freeze the event loop."""
     while True:
         try:
             config = load_env()
@@ -174,70 +279,22 @@ async def scheduler_worker():
                 "SELECT * FROM scheduled_posts WHERE status = 'Pending' AND schedule_time <= ?",
                 (now_str,)
             )
-            jobs = cursor.fetchall()
+            jobs = [dict(row) for row in cursor.fetchall()]
+            conn.close()
             
             for job in jobs:
-                job_id = job["id"]
-                post_id = job["post_id"]
-                caption = job["caption"]
-                slide_urls = json.loads(job["slide_urls"])
-                source_sheet = job["source_sheet"]
-                row_index = job["row_index"]
-
-                print(f"[Worker] Starting publish job {job_id} for Post {post_id}")
-                
-                # Update status to Posting
-                cursor.execute(
-                    "UPDATE scheduled_posts SET status = 'Posting' WHERE id = ?",
-                    (job_id,)
+                logger.info(f"Starting publish job {job['id']} for Post {job['post_id']}")
+                # Run the blocking publish in a thread so the event loop stays responsive
+                await asyncio.to_thread(
+                    _sync_publish_job, job, account_id, token, creds_path, sheet_id
                 )
-                conn.commit()
 
-                try:
-                    # Publish single image vs. carousel
-                    if len(slide_urls) == 1:
-                        published_id = publish_single_post(slide_urls[0], caption, account_id, token)
-                    else:
-                        published_id = publish_carousel_post(slide_urls, caption, account_id, token)
-
-                    # Mark database success
-                    cursor.execute(
-                        "UPDATE scheduled_posts SET status = 'Success', published_id = ? WHERE id = ?",
-                        (published_id, job_id)
-                    )
-                    conn.commit()
-                    print(f"[Worker] Successfully published Job {job_id}. ID: {published_id}")
-
-                    # Update Google Sheet status to 'Posted' if credentials available
-                    client = get_sheets_client(creds_path)
-                    if client and sheet_id and row_index:
-                        try:
-                            spreadsheet = client.open_by_key(sheet_id)
-                            sheet = spreadsheet.worksheet(source_sheet)
-                            headers = sheet.row_values(1)
-                            if "Status" in headers:
-                                col_idx = headers.index("Status") + 1
-                                sheet.update_cell(row_index, col_idx, "Posted")
-                        except Exception as sheet_err:
-                            print(f"[Worker] Failed to update Google Sheet status: {sheet_err}")
-
-                except Exception as ex:
-                    print(f"[Worker] Publish error on Job {job_id}: {ex}")
-                    cursor.execute(
-                        "UPDATE scheduled_posts SET status = 'Failed', error_message = ? WHERE id = ?",
-                        (str(ex), job_id)
-                    )
-                    conn.commit()
-
-            conn.close()
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
-            print(f"[Worker] Scheduler outer loop error: {e}")
+            logger.error(f"Scheduler outer loop error: {e}")
         
         await asyncio.sleep(10)
-
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(scheduler_worker())
 
 # ─── API Endpoints ───────────────────────────────────────────
 
@@ -363,7 +420,6 @@ def delete_scheduled_post(job_id: int):
 
 # Serve static files
 app.mount("/assets", StaticFiles(directory="dashboard/dist/assets"), name="assets")
-app.mount("/static", StaticFiles(directory="dashboard/static"), name="static")
 app.mount("/post", StaticFiles(directory="post"), name="post")
 
 @app.get("/api/post/details")
@@ -870,6 +926,268 @@ def get_campaigns_overview():
         if 'conn' in locals() and conn:
             conn.close()
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/system/dashboard")
+def get_system_dashboard_data():
+    config = load_env()
+    creds_path = config.get("GOOGLE_CREDS_FILE", "google_service_account.json")
+    sheet_id = config.get("GOOGLE_SHEET_ID")
+    
+    # Defaults
+    google_sheet_configured = os.path.exists(creds_path) and bool(sheet_id)
+    cloudinary_configured = bool(config.get("CLOUDINARY_API_KEY"))
+    instagram_configured = bool(config.get("INSTAGRAM_BUSINESS_ACCOUNT_ID")) and bool(config.get("INSTAGRAM_ACCESS_TOKEN"))
+    
+    # 1. Fetch DB scheduler stats
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT status, COUNT(*) as cnt FROM scheduled_posts GROUP BY status")
+    db_stats = {"Pending": 0, "Posting": 0, "Success": 0, "Failed": 0}
+    for r in cursor.fetchall():
+        status = r["status"]
+        if status in db_stats:
+            db_stats[status] = r["cnt"]
+            
+    # Get last 10 jobs
+    cursor.execute("SELECT * FROM scheduled_posts ORDER BY schedule_time DESC LIMIT 10")
+    recent_rows = cursor.fetchall()
+    recent_jobs = []
+    for r in recent_rows:
+        d = dict(r)
+        d["slide_urls"] = json.loads(d["slide_urls"])
+        recent_jobs.append(d)
+        
+    # Get today's combined schedule
+    now = datetime.now()
+    start_of_today = datetime(now.year, now.month, now.day, 0, 0, 0).isoformat()
+    end_of_today = datetime(now.year, now.month, now.day, 23, 59, 59).isoformat()
+    cursor.execute(
+        "SELECT * FROM scheduled_posts WHERE schedule_time >= ? AND schedule_time <= ? ORDER BY schedule_time ASC",
+        (start_of_today, end_of_today)
+    )
+    today_rows = cursor.fetchall()
+    today_schedule = []
+    for r in today_rows:
+        d = dict(r)
+        d["slide_urls"] = json.loads(d["slide_urls"])
+        today_schedule.append(d)
+        
+    conn.close()
+    
+    # 2. Fetch Google Sheets stats (Campaigns + Queue)
+    campaigns_data = []
+    queue_stats = {"total": 0, "posted": 0, "approved": 0, "pending": 0}
+    
+    if google_sheet_configured:
+        try:
+            client = get_sheets_client(creds_path)
+            spreadsheet = client.open_by_key(sheet_id)
+            
+            # Fetch Queue statistics
+            try:
+                queue_sheet = spreadsheet.worksheet("Queue")
+                queue_records = queue_sheet.get_all_records()
+                queue_stats["total"] = len(queue_records)
+                for r in queue_records:
+                    status = str(r.get("Status", "")).strip().lower()
+                    if status == "posted":
+                        queue_stats["posted"] += 1
+                    elif status == "approved":
+                        queue_stats["approved"] += 1
+                    else:
+                        queue_stats["pending"] += 1
+            except Exception as q_err:
+                logger.error(f"Error reading Queue stats: {q_err}")
+                
+            # Fetch Campaign statistics
+            worksheets = [w.title for w in spreadsheet.worksheets() if w.title != "Queue"]
+            for w_title in worksheets:
+                try:
+                    sheet = spreadsheet.worksheet(w_title)
+                    records = sheet.get_all_records()
+                    total_posts = len(records)
+                    
+                    # Fetch SQLite schedules for this sheet to compute stats
+                    conn = sqlite3.connect(DB_PATH)
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT post_id, status FROM scheduled_posts WHERE source_sheet = ?", (w_title,))
+                    db_statuses = {row["post_id"]: row["status"] for row in cursor.fetchall()}
+                    conn.close()
+                    
+                    posted = 0
+                    scheduled = 0
+                    pending = 0
+                    for r in records:
+                        p_id = r.get("Post_ID")
+                        if not p_id:
+                            continue
+                        sh_status = str(r.get("Status", "")).strip().lower()
+                        db_status = db_statuses.get(p_id)
+                        
+                        if sh_status == "posted" or db_status == "Success":
+                            posted += 1
+                        elif db_status == "Pending" or sh_status == "scheduled":
+                            scheduled += 1
+                        else:
+                            pending += 1
+                            
+                    campaigns_data.append({
+                        "worksheet_name": w_title,
+                        "campaign_name": "50-Day D2C Automation" if w_title == "50DaysCampaign" else w_title,
+                        "total_posts": total_posts,
+                        "posted": posted,
+                        "scheduled": scheduled,
+                        "pending": pending
+                    })
+                except Exception as w_err:
+                    logger.error(f"Error reading campaign stats for {w_title}: {w_err}")
+        except Exception as sheet_err:
+            logger.error(f"Error connecting to Google Sheets: {sheet_err}")
+            
+    return {
+        "integrations": {
+            "google_sheets": google_sheet_configured,
+            "cloudinary": cloudinary_configured,
+            "instagram": instagram_configured,
+            "instagram_account": "@goran.dotin" if instagram_configured else "Not Configured"
+        },
+        "database_stats": db_stats,
+        "campaigns": campaigns_data,
+        "queue": queue_stats,
+        "today_schedule": today_schedule,
+        "recent_jobs": recent_jobs
+    }
+
+@app.post("/api/ideas/seed")
+def seed_brand_ideas():
+    config = load_env()
+    creds_path = config.get("GOOGLE_CREDS_FILE", "google_service_account.json")
+    sheet_id = config.get("GOOGLE_SHEET_ID")
+    
+    if not os.path.exists(creds_path) or not sheet_id:
+        raise HTTPException(status_code=400, detail="Google Sheets configuration missing.")
+        
+    try:
+        client = get_sheets_client(creds_path)
+        spreadsheet = client.open_by_key(sheet_id)
+        sheet = spreadsheet.worksheet("Queue")
+        
+        # 5 fresh brand-aligned ideas (NOT AI for D2C)
+        new_ideas = [
+            {
+                "Post_ID": "random_no_code_limits",
+                "Topic": "The limits of No-Code: When you should build custom code instead",
+                "Caption": (
+                    "No-code tools like Zapier and Make are amazing. Until they aren't. 🛑💻\n\n"
+                    "We build millions of automations, and here is when we advise clients to ditch Make/Zapier and write Python/NodeJS instead:\n\n"
+                    "1️⃣ High Volume Data Processing\n"
+                    "→ If you are running 100,000 tasks/month, Zapier bills will eat your margin. A custom script on AWS Lambda costs pennies.\n\n"
+                    "2️⃣ Complex Business Logic\n"
+                    "→ Nested if-else filters, loops, and custom error handling are a nightmare to maintain in visual builders. Code is cleaner, version-controlled, and testable.\n\n"
+                    "3️⃣ Intellectual Property (IP)\n"
+                    "→ If your automation is core to your business value, you shouldn't lease it from a third-party builder. Code it, own it.\n\n"
+                    "The best tech stack is hybrid: No-code for fast prototyping, custom code for scale.\n\n"
+                    "#NoCode #SoftwareEngineering #Python #Scalability #TechStack #GoRanAI"
+                ),
+                "Status": "Approved"
+            },
+            {
+                "Post_ID": "random_automated_reports",
+                "Topic": "How we automated our client reporting — saving 10 hours every week",
+                "Caption": (
+                    "Client reporting is the ultimate time sink. ⏰📊\n\n"
+                    "We used to spend Friday mornings compiling metrics, styling PDFs, and writing summaries. Now, it's 100% automated.\n\n"
+                    "Our stack:\n"
+                    "1️⃣ Data Collector: Scripts pull weekly metrics from Cloudinary, SQLite, and Meta APIs.\n"
+                    "2️⃣ Template Engine: ReportLab generates a brand-aligned, professional PDF.\n"
+                    "3️⃣ Delivery: Slack webhook alerts our team, and Gmail API drafts the email to the client.\n\n"
+                    "Result: Zero friction, 100% accurate metrics, and 10 hours back to work on what matters.\n\n"
+                    "Stop doing manual copy-paste work. If you repeat it every week, automate it.\n\n"
+                    "#AgencyOps #BusinessAutomation #ReportLab #ProductivityHacks #GoRanAI"
+                ),
+                "Status": "Approved"
+            },
+            {
+                "Post_ID": "random_ai_safety_privacy",
+                "Topic": "Data Privacy in the age of AI: How to keep your client data secure",
+                "Caption": (
+                    "Using OpenAI for client data? You might be leaking IP. 🔒⚠️\n\n"
+                    "Here's how we keep data secure at GoRan AI:\n\n"
+                    "1️⃣ Zero Data Retention (ZDR) APIs\n"
+                    "→ We use API endpoints with ZDR guarantees (like OpenAI API, Anthropic API, or Google Vertex AI) instead of consumer web interfaces. Your data is NEVER used for training.\n\n"
+                    "2️⃣ Local Open-Source Models\n"
+                    "→ For highly sensitive client data, we host models (like Llama 3) locally on private secure cloud instances.\n\n"
+                    "3️⃣ Anonymization Pipelines\n"
+                    "→ Automatically scrub names, emails, and financial details before sending data to external APIs.\n\n"
+                    "Security is not an afterthought in automation. It is the foundation.\n\n"
+                    "#DataPrivacy #AICloseup #InformationSecurity #Llama3 #AIAgency #GoRanAI"
+                ),
+                "Status": "Approved"
+            },
+            {
+                "Post_ID": "random_hiring_for_automation",
+                "Topic": "Hiring a 'Chief Automation Officer' — why your company needs one in 2026",
+                "Caption": (
+                    "Hiring managers, software developers, designers... but who owns your operational efficiency? 💼🤖\n\n"
+                    "In 2026, the companies winning aren't those hiring the most heads. They are those leveraging system architects.\n\n"
+                    "Why you need a Chief Automation Officer (CAO) / Operations Engineer:\n"
+                    "→ They connect siloed departments (Sales, Marketing, HR) through unified pipelines.\n"
+                    "→ They audit manual work and eliminate redundancies.\n"
+                    "→ They build the enterprise 'operating system' that lets humans focus on high-leverage tasks.\n\n"
+                    "Scale your systems, not your headcount.\n\n"
+                    "#Hiring #Operations #Efficiency #BusinessStrategy #ChiefAutomationOfficer #GoRanAI"
+                ),
+                "Status": "Approved"
+            },
+            {
+                "Post_ID": "random_systems_over_goals",
+                "Topic": "Systems vs. Goals: Why a solid workflow beats a target sheet every time",
+                "Caption": (
+                    "Goals tell you where you want to go. Systems get you there. 🎯⚙️\n\n"
+                    "We see startups setting massive targets (e.g., 'Publish 30 carousels a month') without setting up the workflow to make it happen.\n\n"
+                    "Without an automated pipeline:\n"
+                    "→ Creators miss deadlines.\n"
+                    "→ Captions are rushed on the day of posting.\n"
+                    "→ High-stress, low-quality output.\n\n"
+                    "With an automated system (like our GoRan AI Scheduler):\n"
+                    "→ Templates are auto-generated.\n"
+                    "→ Sheets sync to the database automatically.\n"
+                    "→ Posts go live on schedule, even when the team is asleep.\n\n"
+                    "Stop obsessing over goals. Start designing systems.\n\n"
+                    "#SystemsThinking #Operations #GoalSetting #StartupTips #GoRanAI"
+                ),
+                "Status": "Approved"
+            }
+        ]
+        
+        headers = sheet.row_values(1)
+        existing_records = sheet.get_all_records()
+        existing_post_ids = {str(r.get("Post_ID", "")).strip() for r in existing_records}
+        
+        added_count = 0
+        for idea in new_ideas:
+            if idea["Post_ID"] in existing_post_ids:
+                continue
+            row = []
+            for h in headers:
+                row.append(idea.get(h, ""))
+            sheet.append_row(row, value_input_option="RAW")
+            added_count += 1
+            
+        return {
+            "status": "success",
+            "message": f"Successfully seeded {added_count} brand-aligned post ideas to the Queue worksheet."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ─── Health Check ─────────────────────────────────────────────
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "service": "goran-instagram-scheduler"}
 
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
