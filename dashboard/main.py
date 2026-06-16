@@ -362,6 +362,7 @@ def delete_scheduled_post(job_id: int):
     return {"status": "success"}
 
 # Serve static files
+app.mount("/assets", StaticFiles(directory="dashboard/dist/assets"), name="assets")
 app.mount("/static", StaticFiles(directory="dashboard/static"), name="static")
 app.mount("/post", StaticFiles(directory="post"), name="post")
 
@@ -872,11 +873,17 @@ def get_campaigns_overview():
 
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
-    with open("dashboard/static/index.html", "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
+    try:
+        with open("dashboard/dist/index.html", "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Frontend build missing</h1><p>Please run <code>npm run build</code> in the frontend folder.</p>", status_code=404)
 
 @app.get("/preview", response_class=HTMLResponse)
 def serve_preview():
-    with open("dashboard/static/preview.html", "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
+    try:
+        with open("dashboard/dist/index.html", "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Frontend build missing</h1><p>Please run <code>npm run build</code> in the frontend folder.</p>", status_code=404)
 
