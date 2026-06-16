@@ -129,7 +129,7 @@ export default function SystemDashboard({ onTabNavigate, onPreviewNavigate }) {
           <h2>System Control Center</h2>
           <p>Analyzing system pipelines, integration statuses, and scheduling queues...</p>
         </header>
-        <div className="grid-layout" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
+        <div className="integrations-grid" style={{ marginBottom: '2rem' }}>
           <div className="loading-skeleton-card" style={{ height: '140px' }}></div>
           <div className="loading-skeleton-card" style={{ height: '140px' }}></div>
           <div className="loading-skeleton-card" style={{ height: '140px' }}></div>
@@ -158,7 +158,7 @@ export default function SystemDashboard({ onTabNavigate, onPreviewNavigate }) {
 
   return (
     <section className="content-section active">
-      <header className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <header className="section-header-flex">
         <div>
           <h2>System Control Center</h2>
           <p>Real-time health monitor, active campaigns, scheduler queue, and logs.</p>
@@ -193,7 +193,7 @@ export default function SystemDashboard({ onTabNavigate, onPreviewNavigate }) {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', marginBottom: '2.5rem' }}>
+      <div className="integrations-grid">
         
         {/* Google Sheets Integration status card */}
         <div className="card" style={{ padding: '1.5rem', display: 'flex', alignItems: 'flex-start', gap: '1rem', borderLeft: `3px solid ${integrations.google_sheets ? 'var(--accent-emerald)' : 'var(--error-border)'}` }}>
@@ -325,7 +325,7 @@ export default function SystemDashboard({ onTabNavigate, onPreviewNavigate }) {
       </div>
 
       {/* Main KPI Stats Row */}
-      <div className="grid-layout" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '2.5rem' }}>
+      <div className="kpi-grid">
         
         {/* SQL Job Health */}
         <div className="card post-card" style={{ padding: '1.8rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
@@ -401,7 +401,7 @@ export default function SystemDashboard({ onTabNavigate, onPreviewNavigate }) {
 
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: '2rem', marginBottom: '2.5rem' }}>
+      <div className="dashboard-split-grid">
         
         {/* Today's Unified Schedule */}
         <div className="card" style={{ padding: '1.8rem' }}>
@@ -490,7 +490,7 @@ export default function SystemDashboard({ onTabNavigate, onPreviewNavigate }) {
             </div>
           </div>
 
-          <div style={{ borderTop: '1px solid var(--card-border)', paddingTop: '1.2rem', marginTop: '1.2rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+          <div className="quick-actions-grid" style={{ borderTop: '1px solid var(--card-border)', paddingTop: '1.2rem', marginTop: '1.2rem' }}>
             <button 
               className="btn secondary" 
               style={{ padding: '0.5rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem' }}

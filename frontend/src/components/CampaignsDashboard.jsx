@@ -210,7 +210,7 @@ export default function CampaignsDashboard({ onPreviewNavigate }) {
       ) : (
         // Detail view
         <div>
-          <header className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem' }}>
+          <header className="section-header-flex">
             <div>
               <h2>{selectedCampaign.campaignName}</h2>
               <p>Worksheet Details & Individual Posts</p>

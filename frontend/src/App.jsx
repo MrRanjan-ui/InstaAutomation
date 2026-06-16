@@ -14,6 +14,7 @@ import './App.css';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [config, setConfig] = useState(null);
   const [posts, setPosts] = useState({ campaign_posts: [], random_posts: [] });
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
@@ -134,12 +135,31 @@ export default function App() {
   return (
     <>
       <div className="glass-bg"></div>
+      
+      <header className="mobile-header">
+        <button className="menu-toggle" onClick={() => setIsSidebarOpen(true)}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
+        <div className="mobile-logo">
+          <img src="https://res.cloudinary.com/dvwpxb2oa/image/upload/v1781609580/Full_Logo_neu1ij.png" alt="GoRan AI Logo" />
+        </div>
+        <div className="mobile-header-spacer"></div>
+      </header>
+
+      <div className={`sidebar-backdrop ${isSidebarOpen ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}></div>
+
       <div className="app-container">
         
         <Sidebar
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           config={config}
+          isOpen={isSidebarOpen}
+          onClose={() => setIsSidebarOpen(false)}
         />
 
         <main className="main-content">

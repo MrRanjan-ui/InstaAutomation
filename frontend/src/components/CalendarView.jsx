@@ -100,7 +100,7 @@ export default function CalendarView({ onPreviewNavigate }) {
 
   return (
     <section className="content-section active">
-      <header className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+      <header className="section-header-flex" style={{ marginBottom: '2rem' }}>
         <div>
           <h2>Schedule Calendar</h2>
           <p>Visual monthly overview of all scheduled and published postings.</p>

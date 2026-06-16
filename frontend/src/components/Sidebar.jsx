@@ -68,7 +68,7 @@ const Icons = {
   brand: null
 };
 
-export default function Sidebar({ activeTab, setActiveTab, config }) {
+export default function Sidebar({ activeTab, setActiveTab, config, isOpen, onClose }) {
   const menuItems = [
     { id: 'dashboard', label: 'System Dashboard', icon: Icons.dashboard },
     { id: 'campaign', label: '50-Day Campaign', icon: Icons.campaign },
@@ -81,14 +81,17 @@ export default function Sidebar({ activeTab, setActiveTab, config }) {
   ];
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
       <div>
-        <div className="brand" style={{ padding: '0', display: 'flex', justifyContent: 'center', marginBottom: '2.5rem' }}>
+        <div className="brand" style={{ padding: '0 0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem' }}>
           <img 
             src="https://res.cloudinary.com/dvwpxb2oa/image/upload/v1781609580/Full_Logo_neu1ij.png" 
             alt="GoRan AI Logo" 
-            style={{ width: '100%', height: 'auto', maxHeight: '50px', objectFit: 'contain' }} 
+            style={{ height: 'auto', maxHeight: '40px', maxWidth: '170px', objectFit: 'contain' }} 
           />
+          <button className="sidebar-close-btn" onClick={onClose}>
+            &times;
+          </button>
         </div>
         
         <nav className="nav-menu">
@@ -96,7 +99,10 @@ export default function Sidebar({ activeTab, setActiveTab, config }) {
             <button
               key={item.id}
               className={`nav-btn ${activeTab === item.id ? 'active' : ''}`}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => {
+                setActiveTab(item.id);
+                if (onClose) onClose();
+              }}
             >
               {item.icon} {item.label}
             </button>
