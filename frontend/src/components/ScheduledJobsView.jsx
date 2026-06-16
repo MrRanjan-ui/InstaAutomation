@@ -16,7 +16,7 @@ const Icons = {
   )
 };
 
-export default function ScheduledJobsView() {
+export default function ScheduledJobsView({ onPreviewNavigate }) {
   const [jobs, setJobs] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -95,13 +95,17 @@ export default function ScheduledJobsView() {
                 const dateLocal = new Date(job.schedule_time).toLocaleString();
 
                 return (
-                  <tr key={job.id}>
+                  <tr 
+                    key={job.id} 
+                    style={{ cursor: onPreviewNavigate ? 'pointer' : 'default' }}
+                    onClick={() => onPreviewNavigate && onPreviewNavigate(job.post_id, job.source_sheet, job.row_index)}
+                  >
                     <td><strong>{job.post_id}</strong></td>
                     <td><span className="badge">{job.source_sheet}</span></td>
                     <td>{job.topic || '-'}</td>
                     <td>{dateLocal}</td>
                     <td><span className={badgeClass}>{job.status}</span></td>
-                    <td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       {job.status === 'Pending' && (
                         <button className="btn secondary" style={{ padding: '0.35rem 0.65rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }} onClick={() => handleDeleteJob(job.id)}>
                           {Icons.trash} Delete

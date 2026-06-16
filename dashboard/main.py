@@ -2,11 +2,12 @@ import os
 import sys
 import json
 import time
-import sqlite3
+from pymongo import MongoClient
+from bson import ObjectId
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List
 import requests
 import gspread
@@ -32,8 +33,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("goran-scheduler")
 
-DB_PATH = "dashboard/scheduler.db"
-ENV_FILE = ".env"
+# Resolve paths relative to project root (one level up from dashboard/)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scheduler.db")
+ENV_FILE = os.path.join(PROJECT_ROOT, ".env")
 
 # ─── Lifespan (replaces deprecated on_event) ──────────────────
 @asynccontextmanager
@@ -89,30 +92,68 @@ def load_env():
     return config
 
 # ─── Database Initialization ──────────────────────────────────
-def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+_mongo_client = None
+
+def get_mongo_db():
+    global _mongo_client
+    config = load_env()
+    mongo_uri = config.get("MONGO_URI", "mongodb://localhost:27017")
     
-    # Scheduled posts table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS scheduled_posts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            post_id TEXT,
-            topic TEXT,
-            source_sheet TEXT,
-            caption TEXT,
-            slide_urls TEXT, -- JSON string list of Cloudinary/image URLs
-            schedule_time TEXT, -- ISO format timestamp
-            status TEXT DEFAULT 'Pending', -- 'Pending', 'Posting', 'Success', 'Failed'
-            published_id TEXT,
-            error_message TEXT,
-            row_index INTEGER,
-            created_at TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+    if "<db_password>" in mongo_uri or "<" in mongo_uri or ">" in mongo_uri:
+        raise ValueError("MongoDB URI contains '<db_password>' placeholder. Please configure your actual password in the .env file.")
+        
+    # Automatically escape special characters in MongoDB credentials if present
+    try:
+        from urllib.parse import urlsplit, urlunsplit, quote_plus, unquote
+        split_uri = urlsplit(mongo_uri)
+        if '@' in split_uri.netloc:
+            creds, hosts = split_uri.netloc.rsplit('@', 1)
+            if ':' in creds:
+                username, password = creds.split(':', 1)
+            else:
+                username, password = creds, ''
+            escaped_username = quote_plus(unquote(username)) if username else ''
+            escaped_password = quote_plus(unquote(password)) if password else ''
+            if escaped_username:
+                if escaped_password:
+                    new_creds = f'{escaped_username}:{escaped_password}'
+                else:
+                    new_creds = escaped_username
+                new_netloc = f'{new_creds}@{hosts}'
+            else:
+                new_netloc = hosts
+            mongo_uri = urlunsplit((split_uri.scheme, new_netloc, split_uri.path, split_uri.query, split_uri.fragment))
+    except Exception as parse_err:
+        logger.warning(f"Failed to auto-escape MongoDB URI: {parse_err}")
+
+    if _mongo_client is None:
+        _mongo_client = MongoClient(mongo_uri)
+    return _mongo_client["goran_ai"]
+
+def serialize_doc(doc):
+    if not doc:
+        return None
+    doc = dict(doc)
+    doc["id"] = str(doc["_id"])
+    del doc["_id"]
+    # If slide_urls in MongoDB is list, return it directly, else deserialize from string
+    if isinstance(doc.get("slide_urls"), str):
+        try:
+            doc["slide_urls"] = json.loads(doc["slide_urls"])
+        except Exception:
+            doc["slide_urls"] = [doc["slide_urls"]]
+    return doc
+
+def init_db():
+    try:
+        db = get_mongo_db()
+        db.scheduled_posts.create_index("status")
+        db.scheduled_posts.create_index("schedule_time")
+        logger.info("MongoDB connection verified & indexes created successfully.")
+    except ValueError as val_err:
+        logger.warning(f"MongoDB connection skipped: {val_err}")
+    except Exception as e:
+        logger.error(f"Failed to initialize MongoDB: {e}")
 
 init_db()
 
@@ -137,9 +178,30 @@ def publish_single_post(image_url: str, caption: str, account_id: str, token: st
         "caption": caption,
         "access_token": token
     }
-    resp = requests.post(url, data=payload)
-    if resp.status_code != 200:
-        raise Exception(f"Failed to create media container: {resp.text}")
+    
+    max_retries = 3
+    backoff = 5
+    resp = None
+    for attempt in range(max_retries):
+        resp = requests.post(url, data=payload)
+        if resp.status_code == 200:
+            break
+            
+        error_data = {}
+        try:
+            error_data = resp.json().get("error", {})
+        except Exception:
+            pass
+            
+        subcode = error_data.get("error_subcode")
+        # Retry on media fetch/download failures (2207052)
+        if subcode == 2207052 and attempt < max_retries - 1:
+            logger.warning(f"Media download failed for single post {image_url} (subcode 2207052). Retrying in {backoff} seconds...")
+            time.sleep(backoff)
+            backoff *= 2
+        else:
+            raise Exception(f"Failed to create media container: {resp.text}")
+            
     container_id = resp.json().get("id")
 
     # Wait for processing
@@ -167,9 +229,30 @@ def publish_carousel_post(image_urls: List[str], caption: str, account_id: str, 
             "is_carousel_item": "true",
             "access_token": token
         }
-        resp = requests.post(item_url, data=payload)
-        if resp.status_code != 200:
-            raise Exception(f"Failed to create carousel item container: {resp.text}")
+        
+        max_retries = 3
+        backoff = 5
+        resp = None
+        for attempt in range(max_retries):
+            resp = requests.post(item_url, data=payload)
+            if resp.status_code == 200:
+                break
+                
+            error_data = {}
+            try:
+                error_data = resp.json().get("error", {})
+            except Exception:
+                pass
+                
+            subcode = error_data.get("error_subcode")
+            # Retry on media fetch/download failures (2207052)
+            if subcode == 2207052 and attempt < max_retries - 1:
+                logger.warning(f"Media download failed for carousel item {url} (subcode 2207052). Retrying in {backoff} seconds...")
+                time.sleep(backoff)
+                backoff *= 2
+            else:
+                raise Exception(f"Failed to create carousel item container: {resp.text}")
+                
         item_ids.append(resp.json().get("id"))
         time.sleep(1)
 
@@ -200,59 +283,238 @@ def publish_carousel_post(image_urls: List[str], caption: str, account_id: str, 
         raise Exception(f"Failed to publish carousel: {pub_resp.text}")
     return pub_resp.json().get("id")
 
+
 # ─── Background Worker ────────────────────────────────────────
+def ensure_cloudinary_urls(slide_urls: List[str], post_id: str) -> List[str]:
+    """Auto-upload local slide URLs to Cloudinary and return secure URLs."""
+    config = load_env()
+    cloud_name = config.get("CLOUDINARY_CLOUD_NAME")
+    api_key = config.get("CLOUDINARY_API_KEY")
+    api_secret = config.get("CLOUDINARY_API_SECRET")
+    
+    if not all([cloud_name, api_key, api_secret]):
+        logger.warning("Cloudinary credentials missing, cannot auto-upload local paths.")
+        return slide_urls
+        
+    try:
+        import cloudinary
+        import cloudinary.uploader
+        cloudinary.config(
+            cloud_name=cloud_name,
+            api_key=api_key,
+            api_secret=api_secret
+        )
+    except Exception as init_err:
+        logger.error(f"Failed to configure Cloudinary client: {init_err}")
+        return slide_urls
+        
+    from urllib.parse import urlparse
+    uploaded_urls = []
+    for idx, url in enumerate(slide_urls, start=1):
+        is_local = False
+        if not (url.startswith("http://") or url.startswith("https://")):
+            is_local = True
+        elif "localhost" in url or "127.0.0.1" in url:
+            is_local = True
+
+        if not is_local:
+            uploaded_urls.append(url)
+        else:
+            # Resolve relative local path
+            if url.startswith("http://") or url.startswith("https://"):
+                parsed = urlparse(url)
+                clean_url = parsed.path.lstrip("/")
+            else:
+                clean_url = url.lstrip("/")
+
+            if clean_url.startswith("post/"):
+                local_path = os.path.join(PROJECT_ROOT, clean_url)
+            else:
+                local_path = os.path.join(PROJECT_ROOT, "post", clean_url)
+                
+            if os.path.exists(local_path):
+                try:
+                    folder_name = f"goran_ai_50days/{post_id}"
+                    public_id_name = f"slide_{idx:02d}"
+                    logger.info(f"Uploading local file {local_path} to Cloudinary folder '{folder_name}' with ID '{public_id_name}'...")
+                    resp = cloudinary.uploader.upload(
+                        local_path,
+                        folder=folder_name,
+                        public_id=public_id_name,
+                        overwrite=True
+                    )
+                    secure_url = resp.get("secure_url")
+                    if secure_url:
+                        uploaded_urls.append(secure_url)
+                    else:
+                        uploaded_urls.append(url)
+                except Exception as e:
+                    logger.error(f"Failed to upload {local_path} to Cloudinary: {e}")
+                    uploaded_urls.append(url)
+            else:
+                logger.warning(f"Local file {local_path} not found for auto-upload.")
+                uploaded_urls.append(url)
+    return uploaded_urls
+
+_token_status_cache = {"timestamp": 0, "data": None}
+
+def check_token_status(token: str) -> dict:
+    url = "https://graph.facebook.com/debug_token"
+    params = {
+        "input_token": token,
+        "access_token": token
+    }
+    try:
+        resp = requests.get(url, params=params)
+        if resp.status_code == 200:
+            data = resp.json().get("data", {})
+            is_valid = data.get("is_valid", False)
+            expires_at = data.get("expires_at", 0) # epoch time
+            scopes = data.get("scopes", [])
+            app_name = data.get("application", "Unknown App")
+            
+            days_remaining = None
+            expires_at_dt = None
+            if expires_at and expires_at > 0:
+                expires_at_dt = datetime.fromtimestamp(expires_at).isoformat()
+                delta = datetime.fromtimestamp(expires_at) - datetime.now()
+                days_remaining = max(0, delta.days)
+            else:
+                days_remaining = 36500  # basically infinite/never expires
+                
+            return {
+                "is_valid": is_valid,
+                "expires_at": expires_at_dt,
+                "days_remaining": days_remaining,
+                "scopes": scopes,
+                "app_name": app_name,
+                "error": None
+            }
+        else:
+            return {
+                "is_valid": False,
+                "expires_at": None,
+                "days_remaining": 0,
+                "scopes": [],
+                "app_name": "N/A",
+                "error": resp.json().get("error", {}).get("message", "API Error")
+            }
+    except Exception as e:
+        return {
+            "is_valid": False,
+            "expires_at": None,
+            "days_remaining": 0,
+            "scopes": [],
+            "app_name": "N/A",
+            "error": str(e)
+        }
+
+def get_cached_token_status(token: str) -> dict:
+    now = time.time()
+    if _token_status_cache["data"] and (now - _token_status_cache["timestamp"] < 300): # cache for 5 minutes
+        return _token_status_cache["data"]
+    
+    data = check_token_status(token)
+    _token_status_cache["data"] = data
+    _token_status_cache["timestamp"] = now
+    return data
+
 def _sync_publish_job(job_dict, account_id, token, creds_path, sheet_id):
     """Synchronous publish logic — runs in a thread to avoid blocking the event loop."""
     job_id = job_dict["id"]
     post_id = job_dict["post_id"]
     caption = job_dict["caption"]
-    slide_urls = json.loads(job_dict["slide_urls"])
+    slide_urls = job_dict["slide_urls"]
+    if isinstance(slide_urls, str):
+        try:
+            slide_urls = json.loads(slide_urls)
+        except Exception:
+            slide_urls = [slide_urls]
     source_sheet = job_dict["source_sheet"]
     row_index = job_dict["row_index"]
 
     # Update status to Posting
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE scheduled_posts SET status = 'Posting' WHERE id = ?", (job_id,))
-    conn.commit()
+    db = get_mongo_db()
+    db.scheduled_posts.update_one({"_id": ObjectId(job_id)}, {"$set": {"status": "Posting"}})
 
     try:
-        # Publish single image vs. carousel
+        # 1. Ensure all slide URLs are uploaded to Cloudinary
+        slide_urls = ensure_cloudinary_urls(slide_urls, post_id)
+        
+        # 2. Update DB with uploaded URLs
+        db.scheduled_posts.update_one({"_id": ObjectId(job_id)}, {"$set": {"slide_urls": slide_urls}})
+
+        # 3. Publish single image vs. carousel
         if len(slide_urls) == 1:
             published_id = publish_single_post(slide_urls[0], caption, account_id, token)
         else:
             published_id = publish_carousel_post(slide_urls, caption, account_id, token)
 
         # Mark database success
-        cursor.execute(
-            "UPDATE scheduled_posts SET status = 'Success', published_id = ? WHERE id = ?",
-            (published_id, job_id)
+        db.scheduled_posts.update_one(
+            {"_id": ObjectId(job_id)},
+            {"$set": {"status": "Success", "published_id": published_id}}
         )
-        conn.commit()
         logger.info(f"Successfully published Job {job_id} (Post {post_id}). Instagram ID: {published_id}")
 
-        # Update Google Sheet status to 'Posted' if credentials available
-        client = get_sheets_client(creds_path)
-        if client and sheet_id and row_index:
+        # Update Google Sheet status to 'Posted' and update Slide URLs if credentials available
+        if os.path.exists(creds_path) and sheet_id and row_index:
             try:
+                client = get_sheets_client(creds_path)
                 spreadsheet = client.open_by_key(sheet_id)
                 sheet = spreadsheet.worksheet(source_sheet)
                 headers = sheet.row_values(1)
+                
+                cells_to_update = []
                 if "Status" in headers:
                     col_idx = headers.index("Status") + 1
-                    sheet.update_cell(row_index, col_idx, "Posted")
+                    cells_to_update.append(gspread.Cell(row=row_index, col=col_idx, value="Posted"))
+                    
+                if "Post_Date" in headers:
+                    col_idx = headers.index("Post_Date") + 1
+                    cells_to_update.append(gspread.Cell(row=row_index, col=col_idx, value=datetime.now().isoformat()))
+                    
+                # Update Slide URLs if they are currently not Cloudinary URLs or not populated
+                for i in range(1, 7):
+                    col_name = f"Slide_{i}_URL"
+                    if col_name in headers:
+                        col_idx = headers.index(col_name) + 1
+                        if i - 1 < len(slide_urls):
+                            cells_to_update.append(gspread.Cell(row=row_index, col=col_idx, value=slide_urls[i - 1]))
+                
+                if cells_to_update:
+                    sheet.update_cells(cells_to_update, value_input_option="RAW")
             except Exception as sheet_err:
                 logger.warning(f"Failed to update Google Sheet status for Job {job_id}: {sheet_err}")
 
     except Exception as ex:
         logger.error(f"Publish error on Job {job_id}: {ex}")
-        cursor.execute(
-            "UPDATE scheduled_posts SET status = 'Failed', error_message = ? WHERE id = ?",
-            (str(ex), job_id)
-        )
-        conn.commit()
-    finally:
-        conn.close()
+        # Retrieve current retry count
+        job = db.scheduled_posts.find_one({"_id": ObjectId(job_id)})
+        current_retry = job.get("retry_count", 0) if job and job.get("retry_count") is not None else 0
+        
+        if current_retry < 3:
+            new_retry = current_retry + 1
+            next_retry_time = (datetime.now() + timedelta(minutes=2)).isoformat()
+            db.scheduled_posts.update_one(
+                {"_id": ObjectId(job_id)},
+                {"$set": {
+                    "status": "Pending",
+                    "retry_count": new_retry,
+                    "error_message": f"Attempt {new_retry} failed: {ex}",
+                    "schedule_time": next_retry_time
+                }}
+            )
+            logger.info(f"Retrying Job {job_id} in 2 minutes (Attempt {new_retry}/3)")
+        else:
+            db.scheduled_posts.update_one(
+                {"_id": ObjectId(job_id)},
+                {"$set": {
+                    "status": "Failed",
+                    "error_message": f"Failed after 3 attempts. Last error: {ex}"
+                }}
+            )
+    # connection doesn't need closing because MongoClient manages it
 
 async def scheduler_worker():
     """Background worker that polls for pending posts and publishes them.
@@ -269,18 +531,15 @@ async def scheduler_worker():
                 await asyncio.sleep(10)
                 continue
 
-            conn = sqlite3.connect(DB_PATH)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            db = get_mongo_db()
             
             # Find posts scheduled for now or in the past that are 'Pending'
             now_str = datetime.now().isoformat()
-            cursor.execute(
-                "SELECT * FROM scheduled_posts WHERE status = 'Pending' AND schedule_time <= ?",
-                (now_str,)
-            )
-            jobs = [dict(row) for row in cursor.fetchall()]
-            conn.close()
+            cursor = db.scheduled_posts.find({
+                "status": "Pending",
+                "schedule_time": {"$lte": now_str}
+            })
+            jobs = [serialize_doc(doc) for doc in cursor]
             
             for job in jobs:
                 logger.info(f"Starting publish job {job['id']} for Post {job['post_id']}")
@@ -289,6 +548,10 @@ async def scheduler_worker():
                     _sync_publish_job, job, account_id, token, creds_path, sheet_id
                 )
 
+        except ValueError as val_err:
+            logger.warning(f"Scheduler worker waiting for MongoDB configuration: {val_err}")
+            await asyncio.sleep(60)
+            continue
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -307,15 +570,49 @@ class ScheduleRequest(BaseModel):
     schedule_time: str # ISO string
     row_index: Optional[int] = None
 
+class PublishNowRequest(BaseModel):
+    post_id: str
+    source_sheet: str
+    row_index: int
+    slide_urls: List[str]
+    caption: str
+
+@app.get("/api/token/status")
+def get_token_status():
+    config = load_env()
+    token = config.get("INSTAGRAM_ACCESS_TOKEN")
+    if not token:
+        return {
+            "is_valid": False,
+            "expires_at": None,
+            "days_remaining": 0,
+            "scopes": [],
+            "app_name": "N/A",
+            "error": "Instagram access token not configured in .env file."
+        }
+    status = get_cached_token_status(token)
+    return status
+
 @app.get("/api/config")
 def get_dashboard_config():
     config = load_env()
     creds_exist = os.path.exists(config.get("GOOGLE_CREDS_FILE", "google_service_account.json"))
+    instagram_configured = bool(config.get("INSTAGRAM_ACCESS_TOKEN"))
+    mongodb_configured = False
+    try:
+        db = get_mongo_db()
+        db.command("ping")
+        mongodb_configured = True
+    except Exception as e:
+        logger.error(f"MongoDB connection check failed: {e}")
+        
     return {
         "google_sheet_id": config.get("GOOGLE_SHEET_ID", "Not Configured"),
         "google_creds_configured": creds_exist,
         "instagram_account_id": config.get("INSTAGRAM_BUSINESS_ACCOUNT_ID", "Not Configured"),
-        "cloudinary_configured": bool(config.get("CLOUDINARY_API_KEY"))
+        "cloudinary_configured": bool(config.get("CLOUDINARY_API_KEY")),
+        "mongodb_configured": mongodb_configured,
+        "token_status": get_cached_token_status(config.get("INSTAGRAM_ACCESS_TOKEN")) if instagram_configured else None
     }
 
 @app.get("/api/posts")
@@ -368,54 +665,84 @@ def get_posts_from_sheets():
 
 @app.post("/api/schedule")
 def schedule_post(req: ScheduleRequest):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    db = get_mongo_db()
     created_at = datetime.now().isoformat()
     
-    cursor.execute(
-        """
-        INSERT INTO scheduled_posts 
-        (post_id, topic, source_sheet, caption, slide_urls, schedule_time, status, row_index, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'Pending', ?, ?)
-        """,
-        (
-            req.post_id,
-            req.topic,
-            req.source_sheet,
-            req.caption,
-            json.dumps(req.slide_urls),
-            req.schedule_time,
-            req.row_index,
-            created_at
+    # Check for existing Pending job
+    existing = db.scheduled_posts.find_one({
+        "post_id": req.post_id,
+        "source_sheet": req.source_sheet,
+        "status": "Pending"
+    })
+    
+    if existing:
+        db.scheduled_posts.update_one(
+            {"_id": existing["_id"]},
+            {"$set": {
+                "topic": req.topic,
+                "caption": req.caption,
+                "slide_urls": req.slide_urls,
+                "schedule_time": req.schedule_time,
+                "row_index": req.row_index
+            }}
         )
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "success", "message": f"Post {req.post_id} scheduled successfully for {req.schedule_time}."}
+        message = f"Post {req.post_id} schedule updated successfully for {req.schedule_time}."
+    else:
+        db.scheduled_posts.insert_one({
+            "post_id": req.post_id,
+            "topic": req.topic,
+            "source_sheet": req.source_sheet,
+            "caption": req.caption,
+            "slide_urls": req.slide_urls,
+            "schedule_time": req.schedule_time,
+            "status": "Pending",
+            "row_index": req.row_index,
+            "created_at": created_at,
+            "retry_count": 0
+        })
+        message = f"Post {req.post_id} scheduled successfully for {req.schedule_time}."
+        
+    # Sync Google Sheet status and Post_Date if row_index is provided
+    if req.row_index and req.source_sheet:
+        config = load_env()
+        creds_path = config.get("GOOGLE_CREDS_FILE", "google_service_account.json")
+        sheet_id = config.get("GOOGLE_SHEET_ID")
+        if os.path.exists(creds_path) and sheet_id:
+            try:
+                client = get_sheets_client(creds_path)
+                spreadsheet = client.open_by_key(sheet_id)
+                sheet = spreadsheet.worksheet(req.source_sheet)
+                headers = sheet.row_values(1)
+                
+                cells_to_update = []
+                if "Status" in headers:
+                    col_idx = headers.index("Status") + 1
+                    cells_to_update.append(gspread.Cell(row=req.row_index, col=col_idx, value="Scheduled"))
+                if "Post_Date" in headers:
+                    col_idx = headers.index("Post_Date") + 1
+                    cells_to_update.append(gspread.Cell(row=req.row_index, col=col_idx, value=req.schedule_time))
+                if cells_to_update:
+                    sheet.update_cells(cells_to_update, value_input_option="RAW")
+            except Exception as sheet_err:
+                logger.warning(f"Failed to update Google Sheet for scheduled post: {sheet_err}")
+                
+    return {"status": "success", "message": message}
 
 @app.get("/api/schedule/list")
 def list_scheduled_posts():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM scheduled_posts ORDER BY schedule_time DESC")
-    rows = cursor.fetchall()
-    conn.close()
-    
-    res = []
-    for r in rows:
-        d = dict(r)
-        d["slide_urls"] = json.loads(d["slide_urls"])
-        res.append(d)
+    db = get_mongo_db()
+    cursor = db.scheduled_posts.find().sort("schedule_time", -1)
+    res = [serialize_doc(doc) for doc in cursor]
     return res
 
 @app.post("/api/schedule/delete/{job_id}")
-def delete_scheduled_post(job_id: int):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM scheduled_posts WHERE id = ? AND status = 'Pending'", (job_id,))
-    conn.commit()
-    conn.close()
+def delete_scheduled_post(job_id: str):
+    db = get_mongo_db()
+    try:
+        db.scheduled_posts.delete_one({"_id": ObjectId(job_id), "status": "Pending"})
+    except Exception as e:
+        logger.error(f"Error deleting scheduled post {job_id}: {e}")
+        raise HTTPException(status_code=400, detail="Invalid job ID format.")
     return {"status": "success"}
 
 # Serve static files
@@ -528,15 +855,9 @@ def get_campaign_posts(worksheet_name: str):
         records = sheet.get_all_records()
         
         # Query local database to get active scheduled times and database status
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT post_id, schedule_time, status FROM scheduled_posts WHERE source_sheet = ?", 
-            (worksheet_name,)
-        )
-        db_schedules = {r["post_id"]: {"time": r["schedule_time"], "status": r["status"]} for r in cursor.fetchall()}
-        conn.close()
+        db = get_mongo_db()
+        cursor = db.scheduled_posts.find({"source_sheet": worksheet_name})
+        db_schedules = {r["post_id"]: {"time": r["schedule_time"], "status": r["status"]} for r in cursor}
         
         posts = []
         for idx, r in enumerate(records, start=2):
@@ -576,14 +897,26 @@ def bulk_schedule_campaign(req: BulkScheduleRequest):
         if "Status" in headers:
             status_col_idx = headers.index("Status") + 1
             
+        post_date_col_idx = None
+        if "Post_Date" in headers:
+            post_date_col_idx = headers.index("Post_Date") + 1
+            
         start_dt = datetime.datetime.strptime(f"{req.start_date} {req.posting_time}", "%Y-%m-%d %H:%M")
         
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        db = get_mongo_db()
         
         scheduled_count = 0
         current_dt = start_dt
         
+        cells_to_update = []
+        
+        # Find columns for Slide_1_URL to Slide_6_URL
+        col_indices = {}
+        for i in range(1, 7):
+            col_name = f"Slide_{i}_URL"
+            if col_name in headers:
+                col_indices[i] = headers.index(col_name) + 1
+                
         for idx, r in enumerate(records, start=2):
             post_id = r.get("Post_ID")
             if not post_id:
@@ -607,41 +940,45 @@ def bulk_schedule_campaign(req: BulkScheduleRequest):
                 post_dir = os.path.join("post", safe_post_id)
                 if os.path.exists(post_dir) and os.path.isdir(post_dir):
                     files = sorted([f for f in os.listdir(post_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-                    slide_urls = [f"/post/{safe_post_id}/{f}" for f in files]
-                    
+                    local_urls = [f"/post/{safe_post_id}/{f}" for f in files]
+                    # Auto-upload local files to Cloudinary
+                    slide_urls = ensure_cloudinary_urls(local_urls, post_id)
+                    # Queue the Cloudinary URLs for batch update in Google Sheet
+                    for i, uploaded_url in enumerate(slide_urls, start=1):
+                        if i in col_indices:
+                            cells_to_update.append(gspread.Cell(row=idx, col=col_indices[i], value=uploaded_url))
+                            
             caption = r.get("Caption", "")
             topic = r.get("Topic", "")
             schedule_time_str = current_dt.isoformat()
             
-            # Delete any existing pending schedule in the local DB
-            cursor.execute(
-                "DELETE FROM scheduled_posts WHERE post_id = ? AND source_sheet = ? AND status = 'Pending'",
-                (post_id, req.worksheet_name)
-            )
+            # Delete any existing pending schedule in the DB
+            db.scheduled_posts.delete_many({
+                "post_id": post_id,
+                "source_sheet": req.worksheet_name,
+                "status": "Pending"
+            })
             
             # Insert new pending schedule
             created_at = datetime.datetime.now().isoformat()
-            cursor.execute(
-                """
-                INSERT INTO scheduled_posts 
-                (post_id, topic, source_sheet, caption, slide_urls, schedule_time, status, row_index, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'Pending', ?, ?)
-                """,
-                (
-                    post_id,
-                    topic,
-                    req.worksheet_name,
-                    caption,
-                    json.dumps(slide_urls),
-                    schedule_time_str,
-                    idx,
-                    created_at
-                )
-            )
+            db.scheduled_posts.insert_one({
+                "post_id": post_id,
+                "topic": topic,
+                "source_sheet": req.worksheet_name,
+                "caption": caption,
+                "slide_urls": slide_urls,
+                "schedule_time": schedule_time_str,
+                "status": "Pending",
+                "row_index": idx,
+                "created_at": created_at,
+                "retry_count": 0
+            })
             
-            # Update status in the sheet worksheet to 'Scheduled'
+            # Update status in the sheet worksheet to 'Scheduled' (queue it for batch update)
             if status_col_idx:
-                sheet.update_cell(idx, status_col_idx, "Scheduled")
+                cells_to_update.append(gspread.Cell(row=idx, col=status_col_idx, value="Scheduled"))
+            if post_date_col_idx:
+                cells_to_update.append(gspread.Cell(row=idx, col=post_date_col_idx, value=schedule_time_str))
                 
             scheduled_count += 1
             
@@ -655,9 +992,10 @@ def bulk_schedule_campaign(req: BulkScheduleRequest):
             elif req.frequency == "custom":
                 current_dt += datetime.timedelta(days=req.interval_days)
                 
-        conn.commit()
-        conn.close()
-        
+        # Perform Google Sheets batch update
+        if cells_to_update:
+            sheet.update_cells(cells_to_update, value_input_option="RAW")
+            
         return {
             "status": "success",
             "message": f"Successfully bulk-scheduled {scheduled_count} posts from '{req.worksheet_name}'."
@@ -683,32 +1021,39 @@ def unschedule_campaign(req: UnscheduleRequest):
         if "Status" in headers:
             status_col_idx = headers.index("Status") + 1
             
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        post_date_col_idx = None
+        if "Post_Date" in headers:
+            post_date_col_idx = headers.index("Post_Date") + 1
+            
+        db = get_mongo_db()
         
         # Find all pending post rows for this campaign to revert sheet status
-        cursor.execute(
-            "SELECT post_id, row_index FROM scheduled_posts WHERE source_sheet = ? AND status = 'Pending'",
-            (req.worksheet_name,)
-        )
-        pending_jobs = cursor.fetchall()
+        cursor = db.scheduled_posts.find({
+            "source_sheet": req.worksheet_name,
+            "status": "Pending"
+        })
+        pending_jobs = list(cursor)
         
         # Delete pending jobs
-        cursor.execute(
-            "DELETE FROM scheduled_posts WHERE source_sheet = ? AND status = 'Pending'",
-            (req.worksheet_name,)
-        )
+        db.scheduled_posts.delete_many({
+            "source_sheet": req.worksheet_name,
+            "status": "Pending"
+        })
         
         reverted_count = 0
+        cells_to_update = []
         for job in pending_jobs:
-            row_idx = job[1]
-            if status_col_idx and row_idx:
-                sheet.update_cell(row_idx, status_col_idx, "Pending")
+            row_idx = job.get("row_index")
+            if row_idx:
+                if status_col_idx:
+                    cells_to_update.append(gspread.Cell(row=row_idx, col=status_col_idx, value="Pending"))
+                if post_date_col_idx:
+                    cells_to_update.append(gspread.Cell(row=row_idx, col=post_date_col_idx, value=""))
                 reverted_count += 1
                 
-        conn.commit()
-        conn.close()
-        
+        if cells_to_update:
+            sheet.update_cells(cells_to_update, value_input_option="RAW")
+            
         return {
             "status": "success",
             "message": f"Successfully unscheduled {reverted_count} pending posts from '{req.worksheet_name}'."
@@ -725,53 +1070,60 @@ def update_single_schedule(req: UpdateSingleScheduleRequest):
         raise HTTPException(status_code=400, detail="Google Sheets configuration missing.")
         
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        db = get_mongo_db()
         
         # Check if a pending job already exists
-        cursor.execute(
-            "SELECT id FROM scheduled_posts WHERE post_id = ? AND source_sheet = ? AND status = 'Pending'",
-            (req.post_id, req.worksheet_name)
-        )
-        existing_job = cursor.fetchone()
+        existing_job = db.scheduled_posts.find_one({
+            "post_id": req.post_id,
+            "source_sheet": req.worksheet_name,
+            "status": "Pending"
+        })
         
         client = get_sheets_client(creds_path)
         spreadsheet = client.open_by_key(sheet_id)
         sheet = spreadsheet.worksheet(req.worksheet_name)
+        headers = sheet.row_values(1)
         
+        status_col_idx = None
+        if "Status" in headers:
+            status_col_idx = headers.index("Status") + 1
+            
+        post_date_col_idx = None
+        if "Post_Date" in headers:
+            post_date_col_idx = headers.index("Post_Date") + 1
+            
         if existing_job:
             # Check the current scheduled time to prevent updates at/near posting time
-            cursor.execute(
-                "SELECT schedule_time FROM scheduled_posts WHERE id = ?",
-                (existing_job[0],)
-            )
-            job_time_str = cursor.fetchone()[0]
+            job_time_str = existing_job.get("schedule_time")
             if job_time_str:
                 job_time = datetime.fromisoformat(job_time_str)
                 time_diff = (job_time - datetime.now()).total_seconds()
                 if time_diff <= 60: # Within 60 seconds or in the past
-                    conn.close()
                     raise HTTPException(
                         status_code=400,
                         detail="Cannot update post schedule at or near its posting time."
                     )
             # Update the scheduled time of existing job
-            cursor.execute(
-                "UPDATE scheduled_posts SET schedule_time = ? WHERE post_id = ? AND source_sheet = ? AND status = 'Pending'",
-                (req.schedule_time, req.post_id, req.worksheet_name)
+            db.scheduled_posts.update_one(
+                {"_id": existing_job["_id"]},
+                {"$set": {"schedule_time": req.schedule_time}}
             )
-            conn.commit()
-            conn.close()
+            
+            # Sync to sheet
+            if post_date_col_idx and existing_job.get("row_index"):
+                sheet.update_cell(existing_job["row_index"], post_date_col_idx, req.schedule_time)
+                
             return {"status": "success", "message": f"Updated scheduled time for {req.post_id}."}
         else:
             # Fetch worksheet data to find the post row and details
             records = sheet.get_all_records()
-            headers = sheet.row_values(1)
             
-            status_col_idx = None
-            if "Status" in headers:
-                status_col_idx = headers.index("Status") + 1
-                
+            col_indices = {}
+            for i in range(1, 7):
+                col_name = f"Slide_{i}_URL"
+                if col_name in headers:
+                    col_indices[i] = headers.index(col_name) + 1
+                    
             found_row = None
             row_idx = None
             for idx, r in enumerate(records, start=2):
@@ -781,12 +1133,10 @@ def update_single_schedule(req: UpdateSingleScheduleRequest):
                     break
                     
             if not found_row:
-                conn.close()
                 raise HTTPException(status_code=404, detail=f"Post '{req.post_id}' not found in campaign worksheet.")
                 
             sheet_status = str(found_row.get("Status", "")).strip().lower()
             if sheet_status == "posted":
-                conn.close()
                 raise HTTPException(status_code=400, detail=f"Post '{req.post_id}' is already posted.")
                 
             # Prepare slide URLs
@@ -801,44 +1151,48 @@ def update_single_schedule(req: UpdateSingleScheduleRequest):
                 post_dir = os.path.join("post", safe_post_id)
                 if os.path.exists(post_dir) and os.path.isdir(post_dir):
                     files = sorted([f for f in os.listdir(post_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-                    slide_urls = [f"/post/{safe_post_id}/{f}" for f in files]
+                    local_urls = [f"/post/{safe_post_id}/{f}" for f in files]
+                    # Auto-upload local files to Cloudinary
+                    slide_urls = ensure_cloudinary_urls(local_urls, req.post_id)
                     
             caption = found_row.get("Caption", "")
             topic = found_row.get("Topic", "")
             created_at = datetime.now().isoformat()
             
             # Insert new pending job
-            cursor.execute(
-                """
-                INSERT INTO scheduled_posts 
-                (post_id, topic, source_sheet, caption, slide_urls, schedule_time, status, row_index, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'Pending', ?, ?)
-                """,
-                (
-                    req.post_id,
-                    topic,
-                    req.worksheet_name,
-                    caption,
-                    json.dumps(slide_urls),
-                    req.schedule_time,
-                    row_idx,
-                    created_at
-                )
-            )
+            db.scheduled_posts.insert_one({
+                "post_id": req.post_id,
+                "topic": topic,
+                "source_sheet": req.worksheet_name,
+                "caption": caption,
+                "slide_urls": slide_urls,
+                "schedule_time": req.schedule_time,
+                "status": "Pending",
+                "row_index": row_idx,
+                "created_at": created_at,
+                "retry_count": 0
+            })
             
-            # Update sheet status to 'Scheduled'
+            # Update sheet status to 'Scheduled' and update Slide URLs and Post_Date in batch
+            cells_to_update = []
             if status_col_idx:
-                sheet.update_cell(row_idx, status_col_idx, "Scheduled")
+                cells_to_update.append(gspread.Cell(row=row_idx, col=status_col_idx, value="Scheduled"))
+            if post_date_col_idx:
+                cells_to_update.append(gspread.Cell(row=row_idx, col=post_date_col_idx, value=req.schedule_time))
                 
-            conn.commit()
-            conn.close()
+            # Update Slide URLs if they are currently not Cloudinary URLs or not populated
+            for i, uploaded_url in enumerate(slide_urls, start=1):
+                if i in col_indices:
+                    cells_to_update.append(gspread.Cell(row=row_idx, col=col_indices[i], value=uploaded_url))
+            
+            if cells_to_update:
+                sheet.update_cells(cells_to_update, value_input_option="RAW")
+                
             return {"status": "success", "message": f"Successfully scheduled post {req.post_id} for {req.schedule_time}."}
             
     except HTTPException:
         raise
     except Exception as e:
-        if 'conn' in locals() and conn:
-            conn.close()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/campaigns/overview")
@@ -854,25 +1208,17 @@ def get_campaigns_overview():
         spreadsheet = client.open_by_key(sheet_id)
         worksheets = [w.title for w in spreadsheet.worksheets() if w.title != "Queue"]
         
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        db = get_mongo_db()
         
         # Get today's range in local time
         now = datetime.now()
         start_of_today = datetime(now.year, now.month, now.day, 0, 0, 0).isoformat()
         end_of_today = datetime(now.year, now.month, now.day, 23, 59, 59).isoformat()
         
-        cursor.execute(
-            "SELECT * FROM scheduled_posts WHERE schedule_time >= ? AND schedule_time <= ? ORDER BY schedule_time ASC",
-            (start_of_today, end_of_today)
-        )
-        today_rows = cursor.fetchall()
-        today_posts = []
-        for r in today_rows:
-            d = dict(r)
-            d["slide_urls"] = json.loads(d["slide_urls"])
-            today_posts.append(d)
+        cursor_today = db.scheduled_posts.find({
+            "schedule_time": {"$gte": start_of_today, "$lte": end_of_today}
+        }).sort("schedule_time", 1)
+        today_posts = [serialize_doc(doc) for doc in cursor_today]
             
         campaigns_data = []
         for w_title in worksheets:
@@ -882,11 +1228,8 @@ def get_campaigns_overview():
                 total_posts = len(records)
                 
                 # Fetch DB statuses for stats
-                cursor.execute(
-                    "SELECT post_id, status FROM scheduled_posts WHERE source_sheet = ?",
-                    (w_title,)
-                )
-                db_statuses = {row["post_id"]: row["status"] for row in cursor.fetchall()}
+                cursor_stat = db.scheduled_posts.find({"source_sheet": w_title})
+                db_statuses = {row["post_id"]: row["status"] for row in cursor_stat}
                 
                 posted_count = 0
                 scheduled_count = 0
@@ -915,9 +1258,8 @@ def get_campaigns_overview():
                     "pending": pending_count
                 })
             except Exception as w_err:
-                print(f"Error processing worksheet {w_title}: {w_err}")
+                logger.error(f"Error processing worksheet {w_title}: {w_err}")
                 
-        conn.close()
         return {
             "campaigns": campaigns_data,
             "today_posts": today_posts
@@ -938,44 +1280,49 @@ def get_system_dashboard_data():
     cloudinary_configured = bool(config.get("CLOUDINARY_API_KEY"))
     instagram_configured = bool(config.get("INSTAGRAM_BUSINESS_ACCOUNT_ID")) and bool(config.get("INSTAGRAM_ACCESS_TOKEN"))
     
-    # 1. Fetch DB scheduler stats
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    db = get_mongo_db()
     
-    cursor.execute("SELECT status, COUNT(*) as cnt FROM scheduled_posts GROUP BY status")
+    # Check if MongoDB is connected
+    mongodb_configured = False
+    try:
+        db.command("ping")
+        mongodb_configured = True
+    except Exception:
+        pass
+        
+    # 1. Fetch DB scheduler stats
     db_stats = {"Pending": 0, "Posting": 0, "Success": 0, "Failed": 0}
-    for r in cursor.fetchall():
-        status = r["status"]
-        if status in db_stats:
-            db_stats[status] = r["cnt"]
+    try:
+        pipeline = [{"$group": {"_id": "$status", "cnt": {"$sum": 1}}}]
+        results = db.scheduled_posts.aggregate(pipeline)
+        for r in results:
+            status = r["_id"]
+            if status in db_stats:
+                db_stats[status] = r["cnt"]
+    except Exception as e:
+        logger.error(f"Error fetching MongoDB stats: {e}")
             
     # Get last 10 jobs
-    cursor.execute("SELECT * FROM scheduled_posts ORDER BY schedule_time DESC LIMIT 10")
-    recent_rows = cursor.fetchall()
-    recent_jobs = []
-    for r in recent_rows:
-        d = dict(r)
-        d["slide_urls"] = json.loads(d["slide_urls"])
-        recent_jobs.append(d)
+    try:
+        cursor_recent = db.scheduled_posts.find().sort("schedule_time", -1).limit(10)
+        recent_jobs = [serialize_doc(doc) for doc in cursor_recent]
+    except Exception as e:
+        logger.error(f"Error fetching recent jobs: {e}")
+        recent_jobs = []
         
     # Get today's combined schedule
-    now = datetime.now()
-    start_of_today = datetime(now.year, now.month, now.day, 0, 0, 0).isoformat()
-    end_of_today = datetime(now.year, now.month, now.day, 23, 59, 59).isoformat()
-    cursor.execute(
-        "SELECT * FROM scheduled_posts WHERE schedule_time >= ? AND schedule_time <= ? ORDER BY schedule_time ASC",
-        (start_of_today, end_of_today)
-    )
-    today_rows = cursor.fetchall()
-    today_schedule = []
-    for r in today_rows:
-        d = dict(r)
-        d["slide_urls"] = json.loads(d["slide_urls"])
-        today_schedule.append(d)
+    try:
+        now = datetime.now()
+        start_of_today = datetime(now.year, now.month, now.day, 0, 0, 0).isoformat()
+        end_of_today = datetime(now.year, now.month, now.day, 23, 59, 59).isoformat()
+        cursor_today = db.scheduled_posts.find({
+            "schedule_time": {"$gte": start_of_today, "$lte": end_of_today}
+        }).sort("schedule_time", 1)
+        today_schedule = [serialize_doc(doc) for doc in cursor_today]
+    except Exception as e:
+        logger.error(f"Error fetching today schedule: {e}")
+        today_schedule = []
         
-    conn.close()
-    
     # 2. Fetch Google Sheets stats (Campaigns + Queue)
     campaigns_data = []
     queue_stats = {"total": 0, "posted": 0, "approved": 0, "pending": 0}
@@ -1009,13 +1356,9 @@ def get_system_dashboard_data():
                     records = sheet.get_all_records()
                     total_posts = len(records)
                     
-                    # Fetch SQLite schedules for this sheet to compute stats
-                    conn = sqlite3.connect(DB_PATH)
-                    conn.row_factory = sqlite3.Row
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT post_id, status FROM scheduled_posts WHERE source_sheet = ?", (w_title,))
-                    db_statuses = {row["post_id"]: row["status"] for row in cursor.fetchall()}
-                    conn.close()
+                    # Fetch DB statuses for this sheet to compute stats
+                    cursor_stat = db.scheduled_posts.find({"source_sheet": w_title})
+                    db_statuses = {row["post_id"]: row["status"] for row in cursor_stat}
                     
                     posted = 0
                     scheduled = 0
@@ -1051,8 +1394,10 @@ def get_system_dashboard_data():
         "integrations": {
             "google_sheets": google_sheet_configured,
             "cloudinary": cloudinary_configured,
+            "mongodb": mongodb_configured,
             "instagram": instagram_configured,
-            "instagram_account": "@goran.dotin" if instagram_configured else "Not Configured"
+            "instagram_account": "@goran.dotin" if instagram_configured else "Not Configured",
+            "token_status": get_cached_token_status(config.get("INSTAGRAM_ACCESS_TOKEN")) if instagram_configured else None
         },
         "database_stats": db_stats,
         "campaigns": campaigns_data,
@@ -1197,6 +1542,133 @@ def serve_index():
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Frontend build missing</h1><p>Please run <code>npm run build</code> in the frontend folder.</p>", status_code=404)
 
+@app.post("/api/publish/now")
+async def publish_now(req: PublishNowRequest):
+    config = load_env()
+    account_id = config.get("INSTAGRAM_BUSINESS_ACCOUNT_ID")
+    token = config.get("INSTAGRAM_ACCESS_TOKEN")
+    creds_path = config.get("GOOGLE_CREDS_FILE", "google_service_account.json")
+    sheet_id = config.get("GOOGLE_SHEET_ID")
+    
+    if not account_id or not token:
+        raise HTTPException(status_code=400, detail="Instagram Business Account ID or Access Token is missing.")
+        
+    try:
+        # 1. Ensure all URLs are Cloudinary URLs (auto-upload local paths)
+        slide_urls = await asyncio.to_thread(ensure_cloudinary_urls, req.slide_urls, req.post_id)
+        
+        # 2. Publish immediately
+        if len(slide_urls) == 1:
+            published_id = await asyncio.to_thread(publish_single_post, slide_urls[0], req.caption, account_id, token)
+        else:
+            published_id = await asyncio.to_thread(publish_carousel_post, slide_urls, req.caption, account_id, token)
+            
+        # 3. Insert/Update schedule entry in MongoDB database as 'Success'
+        db = get_mongo_db()
+        created_at = datetime.now().isoformat()
+        
+        existing = db.scheduled_posts.find_one({
+            "post_id": req.post_id,
+            "source_sheet": req.source_sheet,
+            "status": "Pending"
+        })
+        
+        if existing:
+            db.scheduled_posts.update_one(
+                {"_id": existing["_id"]},
+                {"$set": {
+                    "status": "Success",
+                    "published_id": published_id,
+                    "slide_urls": slide_urls,
+                    "caption": req.caption
+                }}
+            )
+        else:
+            db.scheduled_posts.insert_one({
+                "post_id": req.post_id,
+                "topic": req.post_id,
+                "source_sheet": req.source_sheet,
+                "caption": req.caption,
+                "slide_urls": slide_urls,
+                "schedule_time": created_at,
+                "status": "Success",
+                "published_id": published_id,
+                "row_index": req.row_index,
+                "created_at": created_at,
+                "retry_count": 0
+            })
+        
+        # 4. Update Google Sheet status to 'Posted' and URLs if needed
+        if os.path.exists(creds_path) and sheet_id and req.row_index:
+            try:
+                def update_sheet():
+                    client = get_sheets_client(creds_path)
+                    spreadsheet = client.open_by_key(sheet_id)
+                    sheet = spreadsheet.worksheet(req.source_sheet)
+                    headers = sheet.row_values(1)
+                    
+                    cells_to_update = []
+                    if "Status" in headers:
+                        col_idx = headers.index("Status") + 1
+                        cells_to_update.append(gspread.Cell(row=req.row_index, col=col_idx, value="Posted"))
+                    if "Post_Date" in headers:
+                        col_idx = headers.index("Post_Date") + 1
+                        cells_to_update.append(gspread.Cell(row=req.row_index, col=col_idx, value=datetime.now().isoformat()))
+                    
+                    # Update columns for Slide_1_URL to Slide_6_URL
+                    for i in range(1, 7):
+                        col_name = f"Slide_{i}_URL"
+                        if col_name in headers:
+                            col_idx = headers.index(col_name) + 1
+                            if i - 1 < len(slide_urls):
+                                cells_to_update.append(gspread.Cell(row=req.row_index, col=col_idx, value=slide_urls[i - 1]))
+                                
+                    if cells_to_update:
+                        sheet.update_cells(cells_to_update, value_input_option="RAW")
+                        
+                await asyncio.to_thread(update_sheet)
+            except Exception as sheet_err:
+                logger.warning(f"Failed to update Google Sheet for immediate post: {sheet_err}")
+                
+        return {"status": "success", "published_id": published_id}
+        
+    except Exception as e:
+        logger.error(f"Immediate publish failed for {req.post_id}: {e}")
+        try:
+            db = get_mongo_db()
+            existing = db.scheduled_posts.find_one({
+                "post_id": req.post_id,
+                "source_sheet": req.source_sheet,
+                "status": "Pending"
+            })
+            if existing:
+                db.scheduled_posts.update_one(
+                    {"_id": existing["_id"]},
+                    {"$set": {
+                        "status": "Failed",
+                        "error_message": str(e)
+                    }}
+                )
+            else:
+                created_at = datetime.now().isoformat()
+                db.scheduled_posts.insert_one({
+                    "post_id": req.post_id,
+                    "topic": req.post_id,
+                    "source_sheet": req.source_sheet,
+                    "caption": req.caption,
+                    "slide_urls": req.slide_urls,
+                    "schedule_time": created_at,
+                    "status": "Failed",
+                    "error_message": str(e),
+                    "row_index": req.row_index,
+                    "created_at": created_at,
+                    "retry_count": 0
+                })
+        except Exception as db_err:
+            logger.error(f"Failed to update DB failure state: {db_err}")
+            
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/preview", response_class=HTMLResponse)
 def serve_preview():
     try:
@@ -1204,4 +1676,5 @@ def serve_preview():
             return HTMLResponse(content=f.read())
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Frontend build missing</h1><p>Please run <code>npm run build</code> in the frontend folder.</p>", status_code=404)
+
 

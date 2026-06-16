@@ -7,7 +7,7 @@ def main():
     spreadsheet = client.open_by_key(config['google_sheet_id'])
     
     headers = [
-        "Post_ID", "Topic", "Caption", "Status",
+        "Post_ID", "Topic", "Caption", "Status", "Post_Date",
         "Slide_1_URL", "Slide_2_URL", "Slide_3_URL", "Slide_4_URL", "Slide_5_URL", "Slide_6_URL"
     ]
     

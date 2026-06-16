@@ -4,31 +4,12 @@ import json
 import gspread
 from google.oauth2.service_account import Credentials
 
+from config import load_env, get_project_path
+
 if sys.platform.startswith('win'):
     sys.stdout.reconfigure(encoding='utf-8')
 
-ENV_FILE = ".env"
-CONFIG_FILE = "config.json"
 META_TEMP_FILE = "post_temp_meta.json"
-
-def load_config():
-    config = {}
-    if os.path.exists(ENV_FILE):
-        with open(ENV_FILE, "r") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    config[k.strip().lower()] = v.strip()
-        return config
-    elif os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as f:
-            return {k.lower(): v for k, v in json.load(f).items()}
-    else:
-        print("Error: Neither '.env' nor 'config.json' was found. Please create a '.env' file.")
-        sys.exit(1)
 
 def get_sheets_client(creds_path):
     if not os.path.exists(creds_path):
@@ -104,16 +85,16 @@ def format_prompt_output(row):
     print("=" * 80)
 
 def main():
-    config = load_config()
+    config = load_env()
     
     dry_run = "--dry-run" in sys.argv
     
     print("Connecting to Google Sheets...")
-    client = get_sheets_client(config["google_creds_file"])
+    client = get_sheets_client(config.get("GOOGLE_CREDS_FILE", "google_service_account.json"))
     
     try:
-        spreadsheet = client.open_by_key(config["google_sheet_id"])
-        sheet = spreadsheet.worksheet(config["google_sheet_name"])
+        spreadsheet = client.open_by_key(config["GOOGLE_SHEET_ID"])
+        sheet = spreadsheet.worksheet(config.get("GOOGLE_SHEET_NAME", "Queue"))
     except Exception as e:
         print(f"Error opening spreadsheet: {e}")
         print("Please check your google_sheet_id and google_sheet_name in config.json.")
@@ -123,7 +104,7 @@ def main():
         print("\n✅ CONNECTION SUCCESSFUL!")
         print(f"Spreadsheet Title: {spreadsheet.title}")
         print(f"Worksheets found: {[w.title for w in spreadsheet.worksheets()]}")
-        print(f"Target Sheet '{config['google_sheet_name']}' is accessible.")
+        print(f"Target Sheet '{config.get('GOOGLE_SHEET_NAME', 'Queue')}' is accessible.")
         return
 
     # Normal Execution

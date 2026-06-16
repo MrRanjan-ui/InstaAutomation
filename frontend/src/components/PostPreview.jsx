@@ -64,15 +64,6 @@ export default function PostPreview({ postId, sourceSheet, rowIndex, onBack }) {
     e.preventDefault();
     if (!postDetails) return;
 
-    let targetTime = new Date().toISOString();
-    if (scheduleType === 'later') {
-      if (!scheduleTime) {
-        alert('Please select a target date and time.');
-        return;
-      }
-      targetTime = new Date(scheduleTime).toISOString();
-    }
-
     // Prepare slide URLs
     const slideUrls = postDetails.local_slides && postDetails.local_slides.length > 0
       ? postDetails.local_slides.map(path => `${window.location.origin}${path}`)
@@ -88,34 +79,70 @@ export default function PostPreview({ postId, sourceSheet, rowIndex, onBack }) {
       }
     }
 
-    const payload = {
-      post_id: postDetails.post_id,
-      topic: postDetails.data?.Topic || '',
-      source_sheet: postDetails.source_sheet,
-      caption: postDetails.data?.Caption || '',
-      slide_urls: slideUrls,
-      schedule_time: targetTime,
-      row_index: postDetails.row_index
-    };
+    if (scheduleType === 'now') {
+      const payload = {
+        post_id: postDetails.post_id,
+        source_sheet: postDetails.source_sheet,
+        row_index: postDetails.row_index,
+        caption: postDetails.data?.Caption || '',
+        slide_urls: slideUrls
+      };
 
-    try {
-      setIsSubmitting(true);
-      const res = await fetch('/api/schedule', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data.status === 'success') {
-        alert(`Successfully scheduled ${postDetails.post_id}!`);
-        fetchPostDetails();
-      } else {
-        alert('Scheduling failed: ' + (data.detail || 'Unknown error'));
+      try {
+        setIsSubmitting(true);
+        const res = await fetch('/api/publish/now', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+          alert(`Successfully published to Instagram! IG Post ID: ${data.published_id}`);
+          fetchPostDetails();
+        } else {
+          alert('Publishing failed: ' + (data.detail || 'Unknown error'));
+        }
+      } catch (err) {
+        alert('Error publishing post: ' + err.message);
+      } finally {
+        setIsSubmitting(false);
       }
-    } catch (err) {
-      alert('Error scheduling post: ' + err.message);
-    } finally {
-      setIsSubmitting(false);
+    } else {
+      if (!scheduleTime) {
+        alert('Please select a target date and time.');
+        return;
+      }
+      const targetTime = new Date(scheduleTime).toISOString();
+
+      const payload = {
+        post_id: postDetails.post_id,
+        topic: postDetails.data?.Topic || '',
+        source_sheet: postDetails.source_sheet,
+        caption: postDetails.data?.Caption || '',
+        slide_urls: slideUrls,
+        schedule_time: targetTime,
+        row_index: postDetails.row_index
+      };
+
+      try {
+        setIsSubmitting(true);
+        const res = await fetch('/api/schedule', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+          alert(`Successfully scheduled ${postDetails.post_id}!`);
+          fetchPostDetails();
+        } else {
+          alert('Scheduling failed: ' + (data.detail || 'Unknown error'));
+        }
+      } catch (err) {
+        alert('Error scheduling post: ' + err.message);
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -155,7 +182,33 @@ export default function PostPreview({ postId, sourceSheet, rowIndex, onBack }) {
     );
   }
 
-  const slides = postDetails.local_slides || [];
+  const getSlidesToDisplay = () => {
+    if (postDetails.local_slides && postDetails.local_slides.length > 0) {
+      return postDetails.local_slides;
+    }
+    const urls = [];
+    if (postDetails.data) {
+      for (let i = 1; i <= 10; i++) {
+        const val = postDetails.data[`Slide_${i}_URL`] || postDetails.data[`Slide_${i}_image`] || postDetails.data[`Slide_${i}_Link`];
+        if (val && typeof val === 'string' && val.startsWith('http')) {
+          urls.push(val.trim());
+        }
+      }
+      if (urls.length === 0) {
+        Object.keys(postDetails.data).forEach(k => {
+          if (k.toLowerCase().includes('url') || k.toLowerCase().includes('link')) {
+            const val = postDetails.data[k];
+            if (val && typeof val === 'string' && val.startsWith('http')) {
+              urls.push(val.trim());
+            }
+          }
+        });
+      }
+    }
+    return urls;
+  };
+
+  const slides = getSlidesToDisplay();
   const activeSlideSrc = slides[activeSlideIdx];
   const postStatus = postDetails.data?.Status || 'Pending';
 
@@ -311,7 +364,7 @@ export default function PostPreview({ postId, sourceSheet, rowIndex, onBack }) {
                   disabled={isSubmitting || slides.length === 0}
                   style={{ width: '100%', justifyContent: 'center' }}
                 >
-                  {isSubmitting ? 'Scheduling...' : 'Confirm Schedule'}
+                  {isSubmitting ? (scheduleType === 'now' ? 'Publishing to Instagram...' : 'Scheduling...') : (scheduleType === 'now' ? 'Publish Now' : 'Confirm Schedule')}
                 </button>
               </div>
             </form>

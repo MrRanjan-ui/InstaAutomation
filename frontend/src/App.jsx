@@ -160,6 +160,7 @@ export default function App() {
           {activeTab === 'dashboard' && (
             <SystemDashboard
               onTabNavigate={setActiveTab}
+              onPreviewNavigate={handlePreviewNavigate}
             />
           )}
 
@@ -200,7 +201,7 @@ export default function App() {
           )}
 
           {activeTab === 'scheduled' && (
-            <ScheduledJobsView />
+            <ScheduledJobsView onPreviewNavigate={handlePreviewNavigate} />
           )}
 
           {activeTab === 'config' && (

@@ -49,9 +49,64 @@ export default function ConfigView({ config }) {
             )}
           </div>
           <div className="config-item">
+            <span>MongoDB Database:</span>
+            {config?.mongodb_configured ? (
+              <span className="badge status-posted">Connected</span>
+            ) : (
+              <span className="badge status-generating">Missing</span>
+            )}
+          </div>
+          <div className="config-item">
             <span>Instagram Account ID:</span>
             <code>{config?.instagram_account_id || 'Checking...'}</code>
           </div>
+          {config?.token_status && (
+            <>
+              <div className="config-item" style={{ borderTop: '1px solid var(--card-border)', paddingTop: '0.8rem', marginTop: '0.8rem' }}>
+                <span>Token Status:</span>
+                <span className={`badge ${config.token_status.is_valid ? 'status-posted' : 'status-failed'}`}>
+                  {config.token_status.is_valid ? 'Valid' : 'Invalid/Expired'}
+                </span>
+              </div>
+              {config.token_status.is_valid && (
+                <>
+                  <div className="config-item">
+                    <span>Token Scope Count:</span>
+                    <code>{config.token_status.scopes?.length || 0} scopes authorized</code>
+                  </div>
+                  <div className="config-item">
+                    <span>Days Until Expiry:</span>
+                    <span style={{ 
+                      fontWeight: 600,
+                      color: config.token_status.days_remaining < 3 ? '#ef4444' :
+                             config.token_status.days_remaining < 14 ? '#f59e0b' :
+                             'var(--accent-emerald)'
+                    }}>
+                      {config.token_status.days_remaining > 365 ? 'Never (Long-lived)' : `${config.token_status.days_remaining} days`}
+                    </span>
+                  </div>
+                  {config.token_status.expires_at && (
+                    <div className="config-item">
+                      <span>Expires At:</span>
+                      <code>{new Date(config.token_status.expires_at).toLocaleString()}</code>
+                    </div>
+                  )}
+                  {config.token_status.app_name && (
+                    <div className="config-item">
+                      <span>Registered App:</span>
+                      <code>{config.token_status.app_name}</code>
+                    </div>
+                  )}
+                </>
+              )}
+              {config.token_status.error && (
+                <div className="config-item" style={{ color: '#ef4444', fontSize: '0.8rem' }}>
+                  <span>Error:</span>
+                  <code>{config.token_status.error}</code>
+                </div>
+              )}
+            </>
+          )}
         </div>
         
         <div className="card config-card instructions">

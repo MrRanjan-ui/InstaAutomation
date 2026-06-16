@@ -1,71 +1,121 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function ScheduleModal({ isOpen, post, sourceTab, onClose, onScheduleSuccess }) {
   const [scheduleType, setScheduleType] = useState('now');
   const [scheduleTime, setScheduleTime] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [localSlides, setLocalSlides] = useState([]);
+  const [loadingSlides, setLoadingSlides] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && post) {
+      setLocalSlides([]);
+      // Check if we already have slide URLs from sheet data
+      const urls = [];
+      for (let i = 1; i <= 10; i++) {
+        const val = post[`Slide_${i}_URL`] || post[`Slide_${i}_image`] || post[`Slide_${i}_Link`];
+        if (val && typeof val === 'string' && val.startsWith('http')) {
+          urls.push(val.trim());
+        }
+      }
+      
+      if (urls.length > 0) {
+        setLocalSlides(urls);
+      } else {
+        // Fetch details to find local slides on disk
+        setLoadingSlides(true);
+        const pId = post.Post_ID || post.post_id;
+        fetch(`/api/post/details?post_id=${encodeURIComponent(pId)}&source_sheet=${encodeURIComponent(sourceTab)}&row_index=${post.row_index}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.local_slides && data.local_slides.length > 0) {
+              setLocalSlides(data.local_slides);
+            }
+          })
+          .catch(err => console.error("Error fetching local slides:", err))
+          .finally(() => setLoadingSlides(false));
+      }
+    }
+  }, [isOpen, post, sourceTab]);
 
   if (!isOpen || !post) return null;
 
-  // Extract slide URLs
-  const slideUrls = [];
-  for (let i = 1; i <= 10; i++) {
-    const val = post[`Slide_${i}_URL`] || post[`Slide_${i}_image`] || post[`Slide_${i}_Link`];
-    if (val && typeof val === 'string' && val.startsWith('http')) {
-      slideUrls.push(val.trim());
-    }
-  }
-  if (slideUrls.length === 0) {
-    Object.keys(post).forEach(k => {
-      if (k.toLowerCase().includes('url') || k.toLowerCase().includes('link')) {
-        const val = post[k];
-        if (val && typeof val === 'string' && val.startsWith('http')) {
-          slideUrls.push(val.trim());
-        }
-      }
-    });
-  }
-
   const handleSubmit = async (e) => {
     e.preventDefault();
-    let targetTime = new Date().toISOString();
     
-    if (scheduleType === 'later') {
+    // Prepare slide URLs
+    const targetSlideUrls = localSlides.map(url => {
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        return url;
+      }
+      return `${window.location.origin}${url}`;
+    });
+
+    if (scheduleType === 'now') {
+      const payload = {
+        post_id: post.Post_ID || post.post_id,
+        source_sheet: sourceTab,
+        row_index: post.row_index,
+        caption: post.Caption || '',
+        slide_urls: targetSlideUrls
+      };
+
+      try {
+        setIsSubmitting(true);
+        const res = await fetch('/api/publish/now', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+          alert(`Successfully published to Instagram! IG Post ID: ${data.published_id}`);
+          onScheduleSuccess();
+          onClose();
+        } else {
+          alert('Publishing failed: ' + (data.detail || 'Unknown error'));
+        }
+      } catch (err) {
+        alert('Error publishing post: ' + err.message);
+      } finally {
+        setIsSubmitting(false);
+      }
+    } else {
       if (!scheduleTime) {
         alert('Please select a target date and time.');
         return;
       }
-      targetTime = new Date(scheduleTime).toISOString();
-    }
+      const targetTime = new Date(scheduleTime).toISOString();
 
-    const payload = {
-      post_id: post.Post_ID,
-      topic: post.Topic || '',
-      source_sheet: sourceTab,
-      caption: post.Caption || '',
-      slide_urls: slideUrls,
-      schedule_time: targetTime,
-      row_index: post.row_index
-    };
+      const payload = {
+        post_id: post.Post_ID || post.post_id,
+        topic: post.Topic || '',
+        source_sheet: sourceTab,
+        caption: post.Caption || '',
+        slide_urls: targetSlideUrls,
+        schedule_time: targetTime,
+        row_index: post.row_index
+      };
 
-    try {
-      setIsSubmitting(true);
-      const res = await fetch('/api/schedule', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data.status === 'success') {
-        onScheduleSuccess();
-        onClose();
-      } else {
-        alert('Scheduling failed: ' + (data.detail || 'Unknown error'));
+      try {
+        setIsSubmitting(true);
+        const res = await fetch('/api/schedule', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+          onScheduleSuccess();
+          onClose();
+        } else {
+          alert('Scheduling failed: ' + (data.detail || 'Unknown error'));
+        }
+      } catch (err) {
+        alert('Error scheduling post: ' + err.message);
+      } finally {
+        setIsSubmitting(false);
       }
-    } catch (err) {
-      alert('Error scheduling post: ' + err.message);
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -73,9 +123,9 @@ export default function ScheduleModal({ isOpen, post, sourceTab, onClose, onSche
     <div className="modal">
       <div className="modal-content card">
         <span className="close-modal" onClick={onClose}>&times;</span>
-        <h3>Schedule: {post.Topic || post.Post_ID}</h3>
+        <h3>Schedule: {post.Topic || post.Post_ID || post.post_id}</h3>
         <p className="subtitle" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-          Post ID: {post.Post_ID} | Source: {sourceTab}
+          Post ID: {post.Post_ID || post.post_id} | Source: {sourceTab}
         </p>
         
         <form onSubmit={handleSubmit} className="modal-form">
@@ -93,7 +143,9 @@ export default function ScheduleModal({ isOpen, post, sourceTab, onClose, onSche
           <div className="form-group">
             <label>Slides Preview</label>
             <div className="slides-preview-container">
-              {slideUrls.map((url, idx) => (
+              {loadingSlides ? (
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Loading slides...</span>
+              ) : localSlides.map((url, idx) => (
                 <img
                   key={idx}
                   src={url}
@@ -101,7 +153,7 @@ export default function ScheduleModal({ isOpen, post, sourceTab, onClose, onSche
                   className="preview-thumb"
                 />
               ))}
-              {slideUrls.length === 0 && (
+              {!loadingSlides && localSlides.length === 0 && (
                 <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                   No slide assets available in Google Sheet row
                 </span>
@@ -140,8 +192,8 @@ export default function ScheduleModal({ isOpen, post, sourceTab, onClose, onSche
             <button type="button" className="btn secondary" onClick={onClose} disabled={isSubmitting}>
               Cancel
             </button>
-            <button type="submit" className="btn primary" disabled={isSubmitting || slideUrls.length === 0}>
-              {isSubmitting ? 'Scheduling...' : 'Confirm Schedule'}
+            <button type="submit" className="btn primary" disabled={isSubmitting || localSlides.length === 0}>
+              {isSubmitting ? (scheduleType === 'now' ? 'Publishing...' : 'Scheduling...') : (scheduleType === 'now' ? 'Publish Now' : 'Confirm Schedule')}
             </button>
           </div>
         </form>

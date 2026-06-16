@@ -67,10 +67,15 @@ const Icons = {
       <line x1="12" y1="8" x2="12" y2="12" />
       <line x1="12" y1="16" x2="12.01" y2="16" />
     </svg>
+  ),
+  key: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3" />
+    </svg>
   )
 };
 
-export default function SystemDashboard({ onTabNavigate }) {
+export default function SystemDashboard({ onTabNavigate, onPreviewNavigate }) {
   const [data, setData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -124,7 +129,8 @@ export default function SystemDashboard({ onTabNavigate }) {
           <h2>System Control Center</h2>
           <p>Analyzing system pipelines, integration statuses, and scheduling queues...</p>
         </header>
-        <div className="grid-layout" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
+        <div className="grid-layout" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
+          <div className="loading-skeleton-card" style={{ height: '140px' }}></div>
           <div className="loading-skeleton-card" style={{ height: '140px' }}></div>
           <div className="loading-skeleton-card" style={{ height: '140px' }}></div>
           <div className="loading-skeleton-card" style={{ height: '140px' }}></div>
@@ -187,8 +193,7 @@ export default function SystemDashboard({ onTabNavigate }) {
         </div>
       )}
 
-      {/* Integrations Health Ribbon */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '2.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', marginBottom: '2.5rem' }}>
         
         {/* Google Sheets Integration status card */}
         <div className="card" style={{ padding: '1.5rem', display: 'flex', alignItems: 'flex-start', gap: '1rem', borderLeft: `3px solid ${integrations.google_sheets ? 'var(--accent-emerald)' : 'var(--error-border)'}` }}>
@@ -241,6 +246,82 @@ export default function SystemDashboard({ onTabNavigate }) {
           </div>
         </div>
 
+        {/* Token Health card */}
+        {integrations.token_status ? (
+          <div className="card" style={{ 
+            padding: '1.5rem', 
+            display: 'flex', 
+            alignItems: 'flex-start', 
+            gap: '1rem', 
+            borderLeft: `3px solid ${
+              !integrations.token_status.is_valid ? '#ef4444' : 
+              integrations.token_status.days_remaining < 3 ? '#ef4444' :
+              integrations.token_status.days_remaining < 14 ? '#f59e0b' :
+              'var(--accent-emerald)'
+            }` 
+          }}>
+            <div style={{ 
+              padding: '0.6rem', 
+              background: !integrations.token_status.is_valid ? 'rgba(239, 68, 68, 0.05)' : 
+                          integrations.token_status.days_remaining < 14 ? 'rgba(245, 158, 11, 0.05)' :
+                          'rgba(16, 185, 129, 0.05)', 
+              borderRadius: '10px', 
+              color: !integrations.token_status.is_valid ? '#ef4444' : 
+                     integrations.token_status.days_remaining < 14 ? '#f59e0b' :
+                     'var(--accent-emerald)', 
+              display: 'flex', 
+              alignItems: 'center' 
+            }}>
+              {Icons.key}
+            </div>
+            <div>
+              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)' }}>Token Expiry</h4>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                {!integrations.token_status.is_valid ? 'Token is Invalid/Expired' : 
+                 integrations.token_status.days_remaining > 365 ? 'Never Expires' : 
+                 `Expires in ${integrations.token_status.days_remaining} days`}
+              </p>
+              <span style={{ 
+                display: 'inline-flex', 
+                alignItems: 'center', 
+                gap: '0.3rem', 
+                fontSize: '0.7rem', 
+                color: !integrations.token_status.is_valid ? '#ef4444' : 
+                       integrations.token_status.days_remaining < 14 ? '#f59e0b' :
+                       'var(--accent-emerald)', 
+                fontWeight: 600, 
+                marginTop: '0.5rem', 
+                textTransform: 'uppercase' 
+              }}>
+                <span className={`pulse ${
+                  !integrations.token_status.is_valid ? 'red' : 
+                  integrations.token_status.days_remaining < 14 ? 'orange' : 'green'
+                }`} style={{ 
+                  background: !integrations.token_status.is_valid ? '#ef4444' : 
+                              integrations.token_status.days_remaining < 14 ? '#f59e0b' :
+                              'var(--accent-emerald)' 
+                }}></span>
+                {!integrations.token_status.is_valid ? 'Expired/Invalid' : 
+                 integrations.token_status.days_remaining < 14 ? 'Expiring Soon' : 'Healthy'}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="card" style={{ padding: '1.5rem', display: 'flex', alignItems: 'flex-start', gap: '1rem', borderLeft: '3px solid #ef4444' }}>
+            <div style={{ padding: '0.6rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '10px', color: '#ef4444', display: 'flex', alignItems: 'center' }}>
+              {Icons.key}
+            </div>
+            <div>
+              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)' }}>Token Expiry</h4>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>No status available</p>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', color: '#ef4444', fontWeight: 600, marginTop: '0.5rem', textTransform: 'uppercase' }}>
+                <span className="pulse" style={{ background: '#ef4444' }}></span>
+                Unconfigured
+              </span>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* Main KPI Stats Row */}
@@ -267,7 +348,7 @@ export default function SystemDashboard({ onTabNavigate }) {
             style={{ width: '100%', padding: '0.45rem', marginTop: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem', fontSize: '0.78rem' }}
             onClick={() => onTabNavigate('scheduled')}
           >
-            Manage SQLite Jobs {Icons.arrowRight}
+            Manage Scheduled Jobs {Icons.arrowRight}
           </button>
         </div>
 
@@ -357,7 +438,11 @@ export default function SystemDashboard({ onTabNavigate }) {
                     const isQueue = post.source_sheet === 'Queue';
 
                     return (
-                      <tr key={post.id} style={{ borderBottom: '1px solid var(--card-border)', fontSize: '0.88rem' }}>
+                      <tr 
+                        key={post.id} 
+                        style={{ borderBottom: '1px solid var(--card-border)', fontSize: '0.88rem', cursor: onPreviewNavigate ? 'pointer' : 'default' }}
+                        onClick={() => onPreviewNavigate && onPreviewNavigate(post.post_id, post.source_sheet, post.row_index)}
+                      >
                         <td style={{ padding: '0.75rem' }}>
                           <span className="badge" style={{ background: isQueue ? 'var(--accent-blue-soft)' : 'var(--accent-emerald-soft)', color: isQueue ? 'var(--accent-blue)' : 'var(--accent-emerald)', border: `1px solid ${isQueue ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)'}` }}>
                             {isQueue ? 'Random Post' : 'Campaign'}
@@ -429,7 +514,7 @@ export default function SystemDashboard({ onTabNavigate }) {
       <div className="card" style={{ padding: '1.8rem', marginBottom: '2rem' }}>
         <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1.2rem', fontSize: '1.1rem', fontWeight: 600 }}>
           <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center' }}>{Icons.database}</span>
-          Recent SQLite Jobs Log (Last 10 Executions)
+          Recent Scheduled Jobs Log (Last 10 Executions)
         </h3>
         <div className="schedule-table-wrapper">
           <table className="schedule-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -447,7 +532,7 @@ export default function SystemDashboard({ onTabNavigate }) {
               {recent_jobs.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
-                    No jobs recorded in SQLite database.
+                    No jobs recorded in scheduler database.
                   </td>
                 </tr>
               ) : (
@@ -459,7 +544,11 @@ export default function SystemDashboard({ onTabNavigate }) {
                   else if (job.status === 'Failed') statusClass += ' status-failed';
 
                   return (
-                    <tr key={job.id} style={{ borderBottom: '1px solid var(--card-border)', fontSize: '0.85rem' }}>
+                    <tr 
+                      key={job.id} 
+                      style={{ borderBottom: '1px solid var(--card-border)', fontSize: '0.85rem', cursor: onPreviewNavigate ? 'pointer' : 'default' }}
+                      onClick={() => onPreviewNavigate && onPreviewNavigate(job.post_id, job.source_sheet, job.row_index)}
+                    >
                       <td style={{ padding: '0.75rem', color: 'var(--text-secondary)' }}>#{job.id}</td>
                       <td style={{ padding: '0.75rem' }}><strong>{job.post_id}</strong></td>
                       <td style={{ padding: '0.75rem', color: 'var(--text-secondary)' }}>{job.source_sheet}</td>

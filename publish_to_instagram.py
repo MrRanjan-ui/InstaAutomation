@@ -8,13 +8,13 @@ import cloudinary
 import cloudinary.uploader
 from google.oauth2.service_account import Credentials
 
+from config import load_env, get_project_path
+
 if sys.platform.startswith('win'):
     sys.stdout.reconfigure(encoding='utf-8')
 
-ENV_FILE = ".env"
-CONFIG_FILE = "config.json"
 META_TEMP_FILE = "post_temp_meta.json"
-SLIDES_DIR = r"d:\InstagramPost\post\post_temp"
+SLIDES_DIR = get_project_path("post", "post_temp")
 
 # 1x1 transparent pixel in Base64 for testing uploads
 TINY_PNG_BASE64 = (
@@ -22,24 +22,8 @@ TINY_PNG_BASE64 = (
     "AAAAASUVORK5CYII="
 )
 
-def load_config():
-    config = {}
-    if os.path.exists(ENV_FILE):
-        with open(ENV_FILE, "r") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    config[k.strip().lower()] = v.strip()
-        return config
-    elif os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as f:
-            return {k.lower(): v for k, v in json.load(f).items()}
-    else:
-        print("Error: Neither '.env' nor 'config.json' was found. Please create a '.env' file.")
-        sys.exit(1)
+
+
 
 def load_post_metadata():
     if not os.path.exists(META_TEMP_FILE):
@@ -53,9 +37,9 @@ def upload_image_to_cloudinary(image_path, config):
     """Uploads a local image file to Cloudinary and returns the secure URL."""
     try:
         cloudinary.config(
-            cloud_name=config["cloudinary_cloud_name"],
-            api_key=config["cloudinary_api_key"],
-            api_secret=config["cloudinary_api_secret"],
+            cloud_name=config["CLOUDINARY_CLOUD_NAME"],
+            api_key=config["CLOUDINARY_API_KEY"],
+            api_secret=config["CLOUDINARY_API_SECRET"],
             secure=True
         )
         response = cloudinary.uploader.upload(image_path)
@@ -68,9 +52,9 @@ def test_cloudinary_upload(config):
     """Uploads a base64 tiny image to verify Cloudinary connection and credentials."""
     try:
         cloudinary.config(
-            cloud_name=config["cloudinary_cloud_name"],
-            api_key=config["cloudinary_api_key"],
-            api_secret=config["cloudinary_api_secret"],
+            cloud_name=config["CLOUDINARY_CLOUD_NAME"],
+            api_key=config["CLOUDINARY_API_KEY"],
+            api_secret=config["CLOUDINARY_API_SECRET"],
             secure=True
         )
         data_uri = f"data:image/png;base64,{TINY_PNG_BASE64}"
@@ -101,12 +85,29 @@ def create_instagram_carousel_item(image_url, account_id, token):
         "is_carousel_item": "true",
         "access_token": token
     }
-    response = requests.post(url, data=payload)
-    if response.status_code == 200:
-        return response.json().get("id")
-    else:
-        print(f"Error creating Instagram item container: {response.status_code} - {response.text}")
-        return None
+    
+    max_retries = 3
+    backoff = 5
+    response = None
+    for attempt in range(max_retries):
+        response = requests.post(url, data=payload)
+        if response.status_code == 200:
+            return response.json().get("id")
+            
+        error_data = {}
+        try:
+            error_data = response.json().get("error", {})
+        except Exception:
+            pass
+            
+        subcode = error_data.get("error_subcode")
+        if subcode == 2207052 and attempt < max_retries - 1:
+            print(f"   [Retry] Media download failed for {image_url}. Retrying in {backoff} seconds...")
+            time.sleep(backoff)
+            backoff *= 2
+        else:
+            print(f"Error creating Instagram item container: {response.status_code} - {response.text}")
+            return None
 
 def create_instagram_carousel_container(item_ids, caption, account_id, token):
     """Creates a parent container combining all slide items."""
@@ -141,7 +142,7 @@ def publish_instagram_container(creation_id, account_id, token):
 
 def update_google_sheet_status(config, row_idx, new_status):
     """Connects to Google Sheets and updates the Status column."""
-    creds_path = config["google_creds_file"]
+    creds_path = config.get("GOOGLE_CREDS_FILE", "google_service_account.json")
     if not os.path.exists(creds_path):
         print("Warning: Google Sheets credential file not found. Skipping sheet status update.")
         return False
@@ -154,8 +155,8 @@ def update_google_sheet_status(config, row_idx, new_status):
     client = gspread.authorize(creds)
     
     try:
-        spreadsheet = client.open_by_key(config["google_sheet_id"])
-        sheet = spreadsheet.worksheet(config["google_sheet_name"])
+        spreadsheet = client.open_by_key(config["GOOGLE_SHEET_ID"])
+        sheet = spreadsheet.worksheet(config.get("GOOGLE_SHEET_NAME", "Queue"))
         headers = sheet.row_values(1)
         if "Status" in headers:
             col_idx = headers.index("Status") + 1
@@ -169,7 +170,7 @@ def update_google_sheet_status(config, row_idx, new_status):
     return False
 
 def main():
-    config = load_config()
+    config = load_env()
     meta = load_post_metadata()
     
     dry_run = "--dry-run" in sys.argv
@@ -187,7 +188,7 @@ def main():
             
         # 2. Test Instagram Graph API
         print("\n2. Testing Instagram Graph API token...")
-        ig_profile = test_instagram_token(config["instagram_business_account_id"], config["instagram_access_token"])
+        ig_profile = test_instagram_token(config["INSTAGRAM_BUSINESS_ACCOUNT_ID"], config["INSTAGRAM_ACCESS_TOKEN"])
         if ig_profile:
             print(f"   ✅ Instagram API connection successful!")
             print(f"   ✅ Instagram Account: @{ig_profile.get('username')} ({ig_profile.get('name')})")
@@ -244,7 +245,7 @@ def main():
     item_ids = []
     for idx, url in enumerate(public_urls, start=1):
         print(f"   Creating container for slide {idx}/{len(public_urls)}...")
-        item_id = create_instagram_carousel_item(url, config["instagram_business_account_id"], config["instagram_access_token"])
+        item_id = create_instagram_carousel_item(url, config["INSTAGRAM_BUSINESS_ACCOUNT_ID"], config["INSTAGRAM_ACCESS_TOKEN"])
         if not item_id:
             print("Error: Failed to create item container. Terminating.")
             sys.exit(1)
@@ -258,8 +259,8 @@ def main():
     carousel_id = create_instagram_carousel_container(
         item_ids, 
         caption_text, 
-        config["instagram_business_account_id"], 
-        config["instagram_access_token"]
+        config["INSTAGRAM_BUSINESS_ACCOUNT_ID"], 
+        config["INSTAGRAM_ACCESS_TOKEN"]
     )
     if not carousel_id:
         print("Error: Failed to create parent carousel container. Terminating.")
@@ -272,7 +273,7 @@ def main():
     
     # 4. Publish Carousel
     print("\nStep 4: Publishing carousel to Instagram live feed...")
-    publish_id = publish_instagram_container(carousel_id, config["instagram_business_account_id"], config["instagram_access_token"])
+    publish_id = publish_instagram_container(carousel_id, config["INSTAGRAM_BUSINESS_ACCOUNT_ID"], config["INSTAGRAM_ACCESS_TOKEN"])
     if not publish_id:
         print("Error: Failed to publish carousel post.")
         sys.exit(1)

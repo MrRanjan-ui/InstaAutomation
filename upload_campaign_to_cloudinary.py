@@ -6,29 +6,18 @@ from google.oauth2.service_account import Credentials
 import cloudinary
 import cloudinary.uploader
 
+from config import load_env, get_project_path
+
 if sys.platform.startswith('win'):
     sys.stdout.reconfigure(encoding='utf-8')
-
-def load_env():
-    config = {}
-    if os.path.exists(".env"):
-        with open(".env", "r") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    config[k.strip().lower()] = v.strip()
-    return config
 
 def main():
     config = load_env()
     
     # Configure Cloudinary
-    cloud_name = config.get("cloudinary_cloud_name")
-    api_key = config.get("cloudinary_api_key")
-    api_secret = config.get("cloudinary_api_secret")
+    cloud_name = config.get("CLOUDINARY_CLOUD_NAME")
+    api_key = config.get("CLOUDINARY_API_KEY")
+    api_secret = config.get("CLOUDINARY_API_SECRET")
     
     if not all([cloud_name, api_key, api_secret]):
         print("Error: Cloudinary credentials missing in .env.")
@@ -42,7 +31,7 @@ def main():
     )
     
     # Configure Sheets
-    creds_path = config.get("google_creds_file", "gen-lang-client-0275017867-958eda657086.json")
+    creds_path = config.get("GOOGLE_CREDS_FILE", "google_service_account.json")
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
@@ -55,7 +44,7 @@ def main():
     creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
     gc = gspread.authorize(creds)
     
-    sheet_id = config.get("google_sheet_id")
+    sheet_id = config.get("GOOGLE_SHEET_ID")
     if not sheet_id:
         print("Error: google_sheet_id missing in .env.")
         sys.exit(1)

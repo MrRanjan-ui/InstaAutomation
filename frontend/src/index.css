@@ -179,6 +179,16 @@ body {
     box-shadow: 0 0 8px var(--accent-emerald);
 }
 
+.pulse.orange {
+    background-color: #f59e0b;
+    box-shadow: 0 0 8px #f59e0b;
+}
+
+.pulse.red {
+    background-color: #ef4444;
+    box-shadow: 0 0 8px #ef4444;
+}
+
 .api-status-card p {
     margin-top: 0.25rem;
     font-size: 0.8rem;
@@ -271,6 +281,12 @@ body {
     background: var(--success-bg);
     color: var(--accent-emerald);
     border-color: var(--success-border);
+}
+
+.badge.status-failed {
+    background: var(--error-bg);
+    color: #ef4444;
+    border-color: var(--error-border);
 }
 
 .post-card h3 {
@@ -845,4 +861,54 @@ body {
     font-size: 0.85rem;
     color: var(--text-primary);
     font-weight: 500;
+}
+
+/* Custom Alert Banner */
+.alert-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.85rem 1.25rem;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    position: relative;
+    border-width: 1px;
+    border-style: solid;
+    margin-bottom: 2rem;
+}
+
+.alert-success {
+    background-color: var(--success-bg);
+    color: var(--accent-emerald);
+    border-color: var(--success-border);
+}
+
+.alert-danger {
+    background-color: var(--error-bg);
+    color: #ef4444;
+    border-color: var(--error-border);
+}
+
+.alert-icon {
+    display: inline-flex;
+    align-items: center;
+}
+
+.alert-text {
+    flex-grow: 1;
+}
+
+.alert-close {
+    background: transparent;
+    border: none;
+    color: currentColor;
+    font-size: 1.2rem;
+    cursor: pointer;
+    line-height: 1;
+    opacity: 0.6;
+    transition: opacity 0.15s ease;
+}
+
+.alert-close:hover {
+    opacity: 1;
 }
