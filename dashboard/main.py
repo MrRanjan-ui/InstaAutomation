@@ -89,6 +89,31 @@ def load_env():
                 if "=" in line:
                     k, v = line.split("=", 1)
                     config[k.strip()] = v.strip()
+                    
+    # Fallback to standard OS environment variables (essential for Render/production)
+    for key, value in os.environ.items():
+        if value:
+            config[key] = value
+            
+    # Dynamically generate Google service account file if GOOGLE_CREDS_JSON is provided
+    creds_json = config.get("GOOGLE_CREDS_JSON")
+    creds_file = config.get("GOOGLE_CREDS_FILE", "google_service_account.json")
+    if creds_json and creds_file:
+        if not os.path.isabs(creds_file):
+            creds_file_path = os.path.join(PROJECT_ROOT, creds_file)
+        else:
+            creds_file_path = creds_file
+            
+        if not os.path.exists(creds_file_path):
+            try:
+                # Validate it is valid JSON and write it
+                json_data = json.loads(creds_json)
+                with open(creds_file_path, "w", encoding="utf-8") as out_f:
+                    json.dump(json_data, out_f, indent=2)
+                logger.info(f"Dynamically generated credentials file from GOOGLE_CREDS_JSON at: {creds_file_path}")
+            except Exception as write_err:
+                logger.error(f"Failed to generate credentials file from GOOGLE_CREDS_JSON: {write_err}")
+                
     return config
 
 # ─── Database Initialization ──────────────────────────────────
