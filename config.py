@@ -37,7 +37,6 @@ def load_env(env_path=None):
                     config[k.strip()] = v.strip()
                     
     # Fallback to standard OS environment variables (essential for Render/production)
-    import os
     for key, value in os.environ.items():
         if value:
             config[key] = value
