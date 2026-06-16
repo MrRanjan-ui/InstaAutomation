@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoRan AI — Instagram Scheduler & Publisher</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="glass-bg"></div>
+    
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <span class="brand-logo">🤖</span>
+                <div class="brand-text">
+                    <h1>GoRan AI</h1>
+                    <p>Publisher Node</p>
+                </div>
+            </div>
+            
+            <nav class="nav-menu">
+                <button class="nav-btn active" data-target="campaign-sec">
+                    <span class="icon">📅</span> 50-Day Campaign
+                </button>
+                <button class="nav-btn" data-target="campaigns-sec">
+                    <span class="icon">📁</span> Campaigns
+                </button>
+                <button class="nav-btn" data-target="calendar-sec">
+                    <span class="icon">📅</span> Calendar View
+                </button>
+                <button class="nav-btn" data-target="random-sec">
+                    <span class="icon">🎲</span> Random Queue
+                </button>
+                <button class="nav-btn" data-target="automation-sec">
+                    <span class="icon">🤖</span> Campaign Automation
+                </button>
+                <button class="nav-btn" data-target="schedule-sec">
+                    <span class="icon">⏳</span> Scheduled Jobs
+                </button>
+                <button class="nav-btn" data-target="config-sec">
+                    <span class="icon">⚙️</span> Configuration
+                </button>
+            </nav>
+            
+            <div class="api-status-card">
+                <div class="status-indicator">
+                    <span class="pulse green"></span>
+                    <span class="indicator-text">Meta Graph API: Online</span>
+                </div>
+                <p id="ig-account-name">@goran.dotin</p>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Alert Banner for errors -->
+            <div id="error-banner" class="alert-banner hidden">
+                <span class="alert-icon">⚠️</span>
+                <span id="error-message" class="alert-text">Error message goes here</span>
+                <button class="alert-close" onclick="closeErrorBanner()">×</button>
+            </div>
+
+            <!-- SECTION 1: 50-Day Campaign -->
+            <section id="campaign-sec" class="content-section active">
+                <header class="section-header">
+                    <h2>50-Day AI Automation Campaign</h2>
+                    <p>Sequential daily posts targeted for the D2C & B2B industries.</p>
+                </header>
+
+                <div class="grid-layout" id="campaign-grid">
+                    <!-- Cards will be populated dynamically -->
+                    <div class="loading-skeleton-card"></div>
+                    <div class="loading-skeleton-card"></div>
+                    <div class="loading-skeleton-card"></div>
+                </div>
+            </section>
+
+            <!-- SECTION 6: Campaigns Master-Detail Dashboard -->
+            <section id="campaigns-sec" class="content-section">
+                <!-- VIEW 6A: Campaigns Dashboard List -->
+                <div id="campaigns-dashboard-view">
+                    <header class="section-header">
+                        <h2>Campaigns Dashboard</h2>
+                        <p>Track all active campaign series, completion progress, and today's schedule.</p>
+                    </header>
+
+                    <!-- Row 1: Today's Scheduled Posts from all campaigns -->
+                    <div class="card" style="margin-bottom: 2rem; padding: 1.5rem;">
+                        <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
+                            <span>📅</span> Today's Scheduled Posts
+                        </h3>
+                        <div class="schedule-table-wrapper">
+                            <table class="schedule-table" style="width: 100%; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="border-bottom: 1px solid var(--card-border);">
+                                        <th style="text-align: left; padding: 0.75rem;">Campaign</th>
+                                        <th style="text-align: left; padding: 0.75rem;">Post ID</th>
+                                        <th style="text-align: left; padding: 0.75rem;">Topic</th>
+                                        <th style="text-align: left; padding: 0.75rem;">Time</th>
+                                        <th style="text-align: left; padding: 0.75rem;">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="today-posts-tbody">
+                                    <tr>
+                                        <td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 2rem;">Loading today's posts...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Row 2: Campaign Series Grid -->
+                    <h3 style="margin-bottom: 1rem; font-family: 'Outfit', sans-serif;">📁 Active Campaigns</h3>
+                    <div class="grid-layout" id="campaigns-list-grid">
+                        <div class="loading-skeleton-card"></div>
+                        <div class="loading-skeleton-card"></div>
+                    </div>
+                </div>
+
+                <!-- VIEW 6B: Particular Campaign Detail View -->
+                <div id="campaigns-detail-view" class="hidden">
+                    <header class="section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                        <div>
+                            <h2 id="campaign-detail-title">Campaign: Loading...</h2>
+                            <p id="campaign-detail-subtitle">Loading campaign statistics and posts...</p>
+                        </div>
+                        <button id="btn-back-to-campaigns" class="btn secondary" style="padding: 0.8rem 1.5rem; border-radius: 8px;">
+                            <span>⬅️</span> Back to Campaigns
+                        </button>
+                    </header>
+
+                    <!-- Campaign detail posts grid -->
+                    <div class="grid-layout" id="campaign-detail-posts-grid">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 7: Calendar View -->
+            <section id="calendar-sec" class="content-section">
+                <header class="section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                    <div>
+                        <h2>Schedule Calendar</h2>
+                        <p>Visual monthly overview of all scheduled and published postings.</p>
+                    </div>
+                    <!-- Month Navigation Controls -->
+                    <div class="calendar-controls" style="display: flex; align-items: center; gap: 1rem; background: var(--card-bg); padding: 0.5rem 1rem; border-radius: 12px; border: 1px solid var(--card-border);">
+                        <button id="btn-prev-month" class="btn secondary" style="padding: 0.4rem 0.8rem; font-size: 0.9rem;">◀</button>
+                        <span id="calendar-month-year" style="font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 1.1rem; min-width: 140px; text-align: center;">...</span>
+                        <button id="btn-next-month" class="btn secondary" style="padding: 0.4rem 0.8rem; font-size: 0.9rem;">▶</button>
+                    </div>
+                </header>
+
+                <!-- Calendar Grid Card -->
+                <div class="card" style="padding: 1.5rem; overflow-x: auto;">
+                    <div class="calendar-container" style="min-width: 700px;">
+                        <!-- Days of week headers -->
+                        <div class="calendar-weekdays" style="display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-weight: 600; color: var(--text-secondary); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; padding-bottom: 1rem; border-bottom: 1px solid var(--card-border);">
+                            <div>Sun</div>
+                            <div>Mon</div>
+                            <div>Tue</div>
+                            <div>Wed</div>
+                            <div>Thu</div>
+                            <div>Fri</div>
+                            <div>Sat</div>
+                        </div>
+                        <!-- Days grid -->
+                        <div id="calendar-days-grid" style="display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: minmax(120px, auto); gap: 1px; background: var(--card-border); margin-top: 1px;">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 2: Random Queue -->
+            <section id="random-sec" class="content-section">
+                <header class="section-header">
+                    <h2>Random Queue</h2>
+                    <p>Topic-based posts fetched from your primary Google Sheet queue tab.</p>
+                </header>
+
+                <div class="grid-layout" id="random-grid">
+                    <!-- Cards will be populated dynamically -->
+                </div>
+            </section>
+
+            <!-- SECTION 5: Campaign Automation -->
+            <section id="automation-sec" class="content-section">
+                <header class="section-header">
+                    <h2>Campaign Automation (Cron Sequencer)</h2>
+                    <p>Select a Google Sheet campaign worksheet and bulk-schedule all posts sequentially.</p>
+                </header>
+
+                <div class="config-grid">
+                    <!-- Config Card -->
+                    <div class="card config-card">
+                        <h3>⚙️ Cron Sequencer Settings</h3>
+                        <form id="bulk-schedule-form" class="modal-form">
+                            <div class="form-group">
+                                <label for="campaign-select">Select Campaign Series</label>
+                                <select id="campaign-select" class="glass-input" required style="width: 100%; padding: 0.8rem; margin-top: 0.5rem;">
+                                    <option value="" disabled selected>Select a campaign...</option>
+                                    <!-- Options populated dynamically -->
+                                </select>
+                            </div>
+                            <div class="form-group row-flex" style="display: flex; gap: 1rem; margin-top: 1rem;">
+                                <div class="flex-col" style="flex: 1;">
+                                    <label for="bulk-start-date">Start Date</label>
+                                    <input type="date" id="bulk-start-date" class="glass-input" required style="width: 100%; padding: 0.8rem; margin-top: 0.5rem;">
+                                </div>
+                                <div class="flex-col" style="flex: 1;">
+                                    <label for="bulk-post-time">Posting Time</label>
+                                    <input type="time" id="bulk-post-time" class="glass-input" required value="10:00" style="width: 100%; padding: 0.8rem; margin-top: 0.5rem;">
+                                </div>
+                            </div>
+                            <div class="form-group row-flex" style="display: flex; gap: 1rem; margin-top: 1rem;">
+                                <div class="flex-col" style="flex: 1;">
+                                    <label for="bulk-frequency">Posting Frequency</label>
+                                    <select id="bulk-frequency" class="glass-input" style="width: 100%; padding: 0.8rem; margin-top: 0.5rem;">
+                                        <option value="daily">Daily</option>
+                                        <option value="weekday">Every Weekday (Mon-Fri)</option>
+                                        <option value="custom">Custom Interval (Every X Days)</option>
+                                    </select>
+                                </div>
+                                <div class="flex-col hidden" id="bulk-interval-wrapper" style="flex: 1;">
+                                    <label for="bulk-interval-days">Interval (Days)</label>
+                                    <input type="number" id="bulk-interval-days" class="glass-input" min="1" value="1" style="width: 100%; padding: 0.8rem; margin-top: 0.5rem;">
+                                </div>
+                            </div>
+                            <div class="form-actions" style="margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: flex-end;">
+                                <button type="button" id="btn-unschedule-campaign" class="btn secondary" style="padding: 0.8rem 1.5rem; border-radius: 8px;">Unschedule All</button>
+                                <button type="submit" id="btn-schedule-campaign" class="btn primary" style="padding: 0.8rem 1.5rem; border-radius: 8px;">Bulk Schedule Campaign</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Info/Explanation Card -->
+                    <div class="card config-card instructions" style="display: flex; flex-direction: column; justify-content: space-between;">
+                        <h3>💡 Automation Instructions</h3>
+                        <div id="bulk-status-log" class="status-log" style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5; margin-top: 1rem; white-space: pre-line;">
+                            Select a campaign from the dropdown to load its post sequence. 
+                            
+                            You can set a start date and daily posting time. The sequencer will calculate and assign dates/times for all posts in the campaign sequence that are not yet published.
+                        </div>
+                    </div>
+
+                    <!-- Single Post Scheduler Card -->
+                    <div class="card config-card" id="single-schedule-card">
+                        <h3>🎯 Single Post Scheduler</h3>
+                        <form id="single-schedule-form" class="modal-form">
+                            <div class="form-group">
+                                <label for="single-post-select">Select Campaign Post</label>
+                                <select id="single-post-select" class="glass-input" required style="width: 100%; padding: 0.8rem; margin-top: 0.5rem;">
+                                    <option value="" disabled selected>Select a post...</option>
+                                    <!-- Options populated dynamically -->
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-top: 1rem;">
+                                <label for="single-post-time">Posting Date & Time</label>
+                                <input type="datetime-local" id="single-post-time" class="glass-input" required style="width: 100%; padding: 0.8rem; margin-top: 0.5rem;">
+                            </div>
+                            <div id="single-post-info" style="font-size: 0.85rem; color: var(--accent-neon-blue); line-height: 1.4; min-height: 2.5rem; margin-top: 0.75rem; white-space: pre-line;">
+                                Choose a post to view its schedule status.
+                            </div>
+                            <div class="form-actions" style="margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: flex-end;">
+                                <button type="submit" id="btn-submit-single-schedule" class="btn primary" style="padding: 0.8rem 1.5rem; border-radius: 8px;">Schedule Post</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Campaign Posts Grid/Table -->
+                <div class="schedule-table-wrapper card" style="margin-top: 2rem; padding: 1.5rem;">
+                    <h3>Campaign Post Sequences</h3>
+                    <table class="schedule-table" style="width: 100%; margin-top: 1rem; border-collapse: collapse;">
+                        <thead>
+                            <tr style="border-bottom: 1px solid var(--card-border);">
+                                <th style="text-align: left; padding: 0.75rem;">Post ID</th>
+                                <th style="text-align: left; padding: 0.75rem;">Topic</th>
+                                <th style="text-align: left; padding: 0.75rem;">Sheet Status</th>
+                                <th style="text-align: left; padding: 0.75rem;">Scheduled Time</th>
+                                <th style="text-align: left; padding: 0.75rem;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="automation-posts-tbody">
+                            <tr>
+                                <td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 2rem;">Select a campaign above to load posts.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- SECTION 3: Scheduled Jobs -->
+            <section id="schedule-sec" class="content-section">
+                <header class="section-header">
+                    <h2>Scheduled & Published Jobs</h2>
+                    <p>Track live execution, pending schedules, and API publishing logs.</p>
+                </header>
+
+                <div class="schedule-table-wrapper card">
+                    <table class="schedule-table">
+                        <thead>
+                            <tr>
+                                <th>Post ID</th>
+                                <th>Source Tab</th>
+                                <th>Topic</th>
+                                <th>Schedule Time</th>
+                                <th>Status</th>
+                                <th>Action/Log</th>
+                            </tr>
+                        </thead>
+                        <tbody id="schedule-tbody">
+                            <!-- Table rows populated dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- SECTION 4: Configuration Info -->
+            <section id="config-sec" class="content-section">
+                <header class="section-header">
+                    <h2>System Configuration</h2>
+                    <p>Check the integration status of Google Sheets, Meta Graph API, and Cloudinary.</p>
+                </header>
+
+                <div class="config-grid">
+                    <div class="card config-card">
+                        <h3>🔑 Credential Environment</h3>
+                        <div class="config-item">
+                            <span>Google Sheets ID:</span>
+                            <code id="cfg-sheet-id">...</code>
+                        </div>
+                        <div class="config-item">
+                            <span>Google service account json:</span>
+                            <span class="badge" id="cfg-creds-status">Checking...</span>
+                        </div>
+                        <div class="config-item">
+                            <span>Cloudinary Cloud:</span>
+                            <span class="badge" id="cfg-cloudinary-status">Checking...</span>
+                        </div>
+                        <div class="config-item">
+                            <span>Instagram Account ID:</span>
+                            <code id="cfg-ig-id">...</code>
+                        </div>
+                    </div>
+                    
+                    <div class="card config-card instructions">
+                        <h3>💡 Operational Rules</h3>
+                        <ul>
+                            <li><strong>Fully Automated:</strong> Once a post is scheduled (or next up in the campaign sequence), the background worker processes it with zero manual intervention.</li>
+                            <li><strong>Pre-generated URLs:</strong> Ensure Cloudinary slide links are filled out in the Google Sheet for automatic scheduling.</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Scheduling Wizard Modal -->
+    <div id="schedule-modal" class="modal">
+        <div class="modal-content card">
+            <span class="close-modal">&times;</span>
+            <h3 id="modal-post-title">Schedule Post</h3>
+            <p id="modal-post-subtitle" class="subtitle">Post ID: ...</p>
+            
+            <form id="schedule-form" class="modal-form">
+                <div class="form-group">
+                    <label for="post-caption">Caption Preview</label>
+                    <textarea id="post-caption" rows="6" readonly class="glass-input"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>Slides Preview</label>
+                    <div class="slides-preview-container" id="modal-slides-preview">
+                        <!-- Image thumbnails will render here -->
+                    </div>
+                </div>
+                
+                <div class="form-group row-flex">
+                    <div class="flex-col">
+                        <label for="schedule-type">Schedule Type</label>
+                        <select id="schedule-type" class="glass-input">
+                            <option value="now">Post Now (Immediate)</option>
+                            <option value="later">Post at Specific Time</option>
+                        </select>
+                    </div>
+                    
+                    <div class="flex-col hidden" id="time-picker-wrapper">
+                        <label for="schedule-datetime">Select Date & Time</label>
+                        <input type="datetime-local" id="schedule-datetime" class="glass-input">
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn secondary close-modal-btn">Cancel</button>
+                    <button type="submit" class="btn primary">Confirm Schedule</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/app.js"></script>
+</body>
+</html>
