@@ -37,11 +37,15 @@ def update_env(key, value):
     print(f"Updated {key} in .env file successfully!")
 
 def main():
-    short_token = "EAATDpMgHAvgBRgfZCG1BavQMGXJANooPXMbKS45oFzwXs3NsXJ8meRRUk351vfO77J7xZBSfwSV0RyVKMtgofuC4D7ftASZATNU64tD98tZBIZBsacpdadUWfOywUBjkp8QAWKlpnwCTzOsVNFxcRTh6TQDPGhIVoc00rjqvvn51fuZAh4ZCsD3aCXTD4nB3Hm0JXld1GiZAq96FByseCaLlgkYOHZCTLtEel8mnqAEoqpZCXj0JMrh199wggjAiHgHZCex9eIeNizFcPnaX6MDQyrZB"
-    
     print("====================================================")
     print("   GoRan AI - Permanent Instagram Token Generator   ")
     print("====================================================\n")
+    
+    user_token = input("Paste your new short-lived User Access Token from Graph API Explorer: ").strip()
+    if not user_token:
+        print("Error: Access token is required.")
+        return
+    short_token = user_token
     
     app_id = input("Enter your Meta App ID: ").strip()
     app_secret = input("Enter your Meta App Secret: ").strip()

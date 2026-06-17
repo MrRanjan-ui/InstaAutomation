@@ -35,8 +35,12 @@ logger = logging.getLogger("goran-scheduler")
 
 # Resolve paths relative to project root (one level up from dashboard/)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scheduler.db")
 ENV_FILE = os.path.join(PROJECT_ROOT, ".env")
+
+from Posting.comment_automation import router as comment_automation_router, comment_polling_worker
 
 # ─── Lifespan (replaces deprecated on_event) ──────────────────
 @asynccontextmanager
@@ -56,17 +60,23 @@ async def lifespan(app: FastAPI):
     scheduler_task = asyncio.create_task(scheduler_worker())
     logger.info("Background scheduler worker started.")
     
+    # Start the comment poller background worker
+    comment_poller_task = asyncio.create_task(comment_polling_worker())
+    logger.info("Comment automation background poller started.")
+    
     yield  # Application runs
     
-    # Shutdown: cancel the scheduler
+    # Shutdown: cancel the scheduler and poller
     scheduler_task.cancel()
+    comment_poller_task.cancel()
     try:
-        await scheduler_task
-    except asyncio.CancelledError:
+        await asyncio.gather(scheduler_task, comment_poller_task, return_exceptions=True)
+    except Exception:
         pass
-    logger.info("Scheduler worker stopped.")
+    logger.info("Scheduler and Comment Poller workers stopped.")
 
 app = FastAPI(title="GoRan AI Instagram Scheduler Dashboard", lifespan=lifespan)
+app.include_router(comment_automation_router)
 
 # ─── CORS Middleware ──────────────────────────────────────────
 app.add_middleware(

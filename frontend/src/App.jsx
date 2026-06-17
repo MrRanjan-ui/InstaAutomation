@@ -6,6 +6,7 @@ import CampaignsDashboard from './components/CampaignsDashboard';
 import CalendarView from './components/CalendarView';
 import QueueView from './components/QueueView';
 import AutomationView from './components/AutomationView';
+import CommentAutomationView from './components/CommentAutomationView';
 import ScheduledJobsView from './components/ScheduledJobsView';
 import ConfigView from './components/ConfigView';
 import PostPreview from './components/PostPreview';
@@ -218,6 +219,10 @@ export default function App() {
             <AutomationView
               onScheduleSuccess={fetchPostsData}
             />
+          )}
+
+          {activeTab === 'comment-automation' && (
+            <CommentAutomationView />
           )}
 
           {activeTab === 'scheduled' && (
