@@ -145,8 +145,8 @@ export default function App() {
             <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
-        <div className="mobile-logo">
-          <img src="https://res.cloudinary.com/dvwpxb2oa/image/upload/v1781609580/Full_Logo_neu1ij.png" alt="GoRan AI Logo" />
+        <div className="mobile-logo" style={{ fontSize: '1.2rem', fontWeight: '700', color: 'var(--text-primary)', letterSpacing: '0.5px' }}>
+          GoRan AI
         </div>
         <div className="mobile-header-spacer"></div>
       </header>

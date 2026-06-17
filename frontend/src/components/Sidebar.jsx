@@ -91,7 +91,7 @@ export default function Sidebar({ activeTab, setActiveTab, config, isOpen, onClo
       <div>
         <div className="brand" style={{ padding: '0 0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem' }}>
           <img 
-            src="https://res.cloudinary.com/dvwpxb2oa/image/upload/v1781609580/Full_Logo_neu1ij.png" 
+            src="https://www.goran.in/Logo.png" 
             alt="GoRan AI Logo" 
             style={{ height: 'auto', maxHeight: '40px', maxWidth: '170px', objectFit: 'contain' }} 
           />
