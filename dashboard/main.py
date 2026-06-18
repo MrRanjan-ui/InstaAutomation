@@ -124,6 +124,20 @@ def load_env():
             except Exception as write_err:
                 logger.error(f"Failed to generate credentials file from GOOGLE_CREDS_JSON: {write_err}")
                 
+    # Self-healing for duplicated token segments
+    token = config.get("INSTAGRAM_ACCESS_TOKEN")
+    if token and len(token) > 220:
+        for length in range(30, len(token) // 2 + 1):
+            found = False
+            for i in range(len(token) - 2 * length + 1):
+                sub = token[i:i+length]
+                if token[i+length:i+2*length] == sub:
+                    config["INSTAGRAM_ACCESS_TOKEN"] = token[:i] + sub + token[i+2*length:]
+                    found = True
+                    break
+            if found:
+                break
+                
     return config
 
 # ─── Database Initialization ──────────────────────────────────
@@ -1567,18 +1581,7 @@ def seed_brand_ideas():
 # ─── Health Check ─────────────────────────────────────────────
 @app.get("/health")
 def health_check():
-    config = load_env()
-    token = config.get("INSTAGRAM_ACCESS_TOKEN", "")
-    env_token = os.environ.get("INSTAGRAM_ACCESS_TOKEN", "")
-    return {
-        "status": "ok",
-        "service": "goran-instagram-scheduler",
-        "config_token_len": len(token),
-        "config_token_repr": repr(token),
-        "env_token_len": len(env_token),
-        "env_token_repr": repr(env_token),
-        "env_file_exists": os.path.exists(ENV_FILE)
-    }
+    return {"status": "ok", "service": "goran-instagram-scheduler"}
 
 @app.get("/", response_class=HTMLResponse)
 def serve_index():

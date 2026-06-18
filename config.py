@@ -59,6 +59,20 @@ def load_env(env_path=None):
             except Exception as write_err:
                 print(f"Failed to generate credentials file from GOOGLE_CREDS_JSON: {write_err}")
                 
+    # Self-healing for duplicated token segments
+    token = config.get("INSTAGRAM_ACCESS_TOKEN")
+    if token and len(token) > 220:
+        for length in range(30, len(token) // 2 + 1):
+            found = False
+            for i in range(len(token) - 2 * length + 1):
+                sub = token[i:i+length]
+                if token[i+length:i+2*length] == sub:
+                    config["INSTAGRAM_ACCESS_TOKEN"] = token[:i] + sub + token[i+2*length:]
+                    found = True
+                    break
+            if found:
+                break
+                
     return config
 
 
