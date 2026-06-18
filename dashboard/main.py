@@ -1569,13 +1569,15 @@ def seed_brand_ideas():
 def health_check():
     config = load_env()
     token = config.get("INSTAGRAM_ACCESS_TOKEN", "")
+    env_token = os.environ.get("INSTAGRAM_ACCESS_TOKEN", "")
     return {
         "status": "ok",
         "service": "goran-instagram-scheduler",
-        "token_len": len(token),
-        "token_prefix": token[:10],
-        "token_suffix": token[-10:],
-        "token_repr": repr(token)
+        "config_token_len": len(token),
+        "config_token_repr": repr(token),
+        "env_token_len": len(env_token),
+        "env_token_repr": repr(env_token),
+        "env_file_exists": os.path.exists(ENV_FILE)
     }
 
 @app.get("/", response_class=HTMLResponse)
