@@ -1567,7 +1567,16 @@ def seed_brand_ideas():
 # ─── Health Check ─────────────────────────────────────────────
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "goran-instagram-scheduler"}
+    config = load_env()
+    token = config.get("INSTAGRAM_ACCESS_TOKEN", "")
+    return {
+        "status": "ok",
+        "service": "goran-instagram-scheduler",
+        "token_len": len(token),
+        "token_prefix": token[:10],
+        "token_suffix": token[-10:],
+        "token_repr": repr(token)
+    }
 
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
