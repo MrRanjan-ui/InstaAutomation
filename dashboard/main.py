@@ -363,8 +363,21 @@ def ensure_cloudinary_urls(slide_urls: List[str], post_id: str) -> List[str]:
         is_local = False
         if not (url.startswith("http://") or url.startswith("https://")):
             is_local = True
-        elif "localhost" in url or "127.0.0.1" in url:
+        elif "localhost" in url or "127.0.0.1" in url or "onrender.com" in url:
             is_local = True
+        else:
+            # Check if it points to a local file path on this server
+            try:
+                parsed = urlparse(url)
+                clean_url = parsed.path.lstrip("/")
+                if clean_url.startswith("post/"):
+                    local_path = os.path.join(PROJECT_ROOT, clean_url)
+                else:
+                    local_path = os.path.join(PROJECT_ROOT, "post", clean_url)
+                if os.path.exists(local_path):
+                    is_local = True
+            except Exception:
+                pass
 
         if not is_local:
             uploaded_urls.append(url)

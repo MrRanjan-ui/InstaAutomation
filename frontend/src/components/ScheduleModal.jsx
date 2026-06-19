@@ -67,7 +67,16 @@ export default function ScheduleModal({ isOpen, post, sourceTab, onClose, onSche
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        const data = await res.json();
+        
+        const contentType = res.headers.get('content-type');
+        let data = {};
+        if (contentType && contentType.includes('application/json')) {
+          data = await res.json();
+        } else {
+          const text = await res.text();
+          throw new Error(`Server returned non-JSON response (${res.status}): ${text.substring(0, 100)}...`);
+        }
+
         if (res.ok && data.status === 'success') {
           alert(`Successfully published to Instagram! IG Post ID: ${data.published_id}`);
           onScheduleSuccess();
@@ -104,7 +113,16 @@ export default function ScheduleModal({ isOpen, post, sourceTab, onClose, onSche
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        const data = await res.json();
+        
+        const contentType = res.headers.get('content-type');
+        let data = {};
+        if (contentType && contentType.includes('application/json')) {
+          data = await res.json();
+        } else {
+          const text = await res.text();
+          throw new Error(`Server returned non-JSON response (${res.status}): ${text.substring(0, 100)}...`);
+        }
+
         if (data.status === 'success') {
           onScheduleSuccess();
           onClose();
