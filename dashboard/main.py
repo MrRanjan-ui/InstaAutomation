@@ -844,21 +844,6 @@ def get_post_details(post_id: str, source_sheet: str, row_index: Optional[int] =
             raise HTTPException(status_code=404, detail=f"Post with ID '{post_id}' not found in '{source_sheet}'.")
             
         local_slides = []
-        safe_post_id = os.path.basename(post_id)
-        post_dir = os.path.join("post", safe_post_id)
-        if os.path.exists(post_dir) and os.path.isdir(post_dir):
-            files = sorted([f for f in os.listdir(post_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-            local_slides = [f"/post/{safe_post_id}/{f}" for f in files]
-        else:
-            post_temp_dir = os.path.join("post", "post_temp")
-            if os.path.exists(post_temp_dir) and os.path.isdir(post_temp_dir):
-                files = sorted([f for f in os.listdir(post_temp_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-                meta_file = "post_temp_meta.json"
-                if os.path.exists(meta_file):
-                    with open(meta_file, "r", encoding="utf-8") as f:
-                        meta = json.load(f)
-                        if meta.get("Post_ID") == post_id:
-                            local_slides = [f"/post/post_temp/{f}" for f in files]
                             
         return {
             "post_id": post_id,
@@ -996,19 +981,7 @@ def bulk_schedule_campaign(req: BulkScheduleRequest):
                 if url:
                     slide_urls.append(url)
                     
-            # Fallback to local files if slide URLs not in sheet yet
-            if not slide_urls:
-                safe_post_id = os.path.basename(post_id)
-                post_dir = os.path.join("post", safe_post_id)
-                if os.path.exists(post_dir) and os.path.isdir(post_dir):
-                    files = sorted([f for f in os.listdir(post_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-                    local_urls = [f"/post/{safe_post_id}/{f}" for f in files]
-                    # Auto-upload local files to Cloudinary
-                    slide_urls = ensure_cloudinary_urls(local_urls, post_id)
-                    # Queue the Cloudinary URLs for batch update in Google Sheet
-                    for i, uploaded_url in enumerate(slide_urls, start=1):
-                        if i in col_indices:
-                            cells_to_update.append(gspread.Cell(row=idx, col=col_indices[i], value=uploaded_url))
+
                             
             caption = r.get("Caption", "")
             topic = r.get("Topic", "")
@@ -1208,15 +1181,7 @@ def update_single_schedule(req: UpdateSingleScheduleRequest):
                 if url:
                     slide_urls.append(url)
                     
-            if not slide_urls:
-                safe_post_id = os.path.basename(req.post_id)
-                post_dir = os.path.join("post", safe_post_id)
-                if os.path.exists(post_dir) and os.path.isdir(post_dir):
-                    files = sorted([f for f in os.listdir(post_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-                    local_urls = [f"/post/{safe_post_id}/{f}" for f in files]
-                    # Auto-upload local files to Cloudinary
-                    slide_urls = ensure_cloudinary_urls(local_urls, req.post_id)
-                    
+
             caption = found_row.get("Caption", "")
             topic = found_row.get("Topic", "")
             created_at = datetime.now().isoformat()
