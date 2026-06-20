@@ -21,6 +21,9 @@ from pydantic import BaseModel
 import cloudinary
 import cloudinary.uploader
 
+def get_now_ist() -> datetime:
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+
 # Ensure stdout handles UTF-8 on Windows
 if sys.platform.startswith('win'):
     sys.stdout.reconfigure(encoding='utf-8')
@@ -534,7 +537,7 @@ def _sync_publish_job(job_dict, account_id, token, creds_path, sheet_id):
                     
                 if "Post_Date" in headers:
                     col_idx = headers.index("Post_Date") + 1
-                    cells_to_update.append(gspread.Cell(row=row_index, col=col_idx, value=datetime.now().isoformat()))
+                    cells_to_update.append(gspread.Cell(row=row_index, col=col_idx, value=get_now_ist().isoformat()))
                     
                 # Update Slide URLs if they are currently not Cloudinary URLs or not populated
                 for i in range(1, 7):
@@ -557,7 +560,7 @@ def _sync_publish_job(job_dict, account_id, token, creds_path, sheet_id):
         
         if current_retry < 3:
             new_retry = current_retry + 1
-            next_retry_time = (datetime.now() + timedelta(minutes=2)).isoformat()
+            next_retry_time = (get_now_ist() + timedelta(minutes=2)).isoformat()
             db.scheduled_posts.update_one(
                 {"_id": ObjectId(job_id)},
                 {"$set": {
@@ -596,7 +599,7 @@ async def scheduler_worker():
             db = get_mongo_db()
             
             # Find posts scheduled for now or in the past that are 'Pending'
-            now_str = datetime.now().isoformat()
+            now_str = get_now_ist().isoformat()
             cursor = db.scheduled_posts.find({
                 "status": "Pending",
                 "schedule_time": {"$lte": now_str}
@@ -728,7 +731,7 @@ def get_posts_from_sheets():
 @app.post("/api/schedule")
 def schedule_post(req: ScheduleRequest):
     db = get_mongo_db()
-    created_at = datetime.now().isoformat()
+    created_at = get_now_ist().isoformat()
     
     # Check for existing Pending job
     existing = db.scheduled_posts.find_one({
@@ -1132,7 +1135,7 @@ def update_single_schedule(req: UpdateSingleScheduleRequest):
             job_time_str = existing_job.get("schedule_time")
             if job_time_str:
                 job_time = datetime.fromisoformat(job_time_str)
-                time_diff = (job_time - datetime.now()).total_seconds()
+                time_diff = (job_time - get_now_ist()).total_seconds()
                 if time_diff <= 60: # Within 60 seconds or in the past
                     raise HTTPException(
                         status_code=400,
@@ -1184,7 +1187,7 @@ def update_single_schedule(req: UpdateSingleScheduleRequest):
 
             caption = found_row.get("Caption", "")
             topic = found_row.get("Topic", "")
-            created_at = datetime.now().isoformat()
+            created_at = get_now_ist().isoformat()
             
             # Insert new pending job
             db.scheduled_posts.insert_one({
@@ -1238,7 +1241,7 @@ def get_campaigns_overview():
         db = get_mongo_db()
         
         # Get today's range in local time
-        now = datetime.now()
+        now = get_now_ist()
         start_of_today = datetime(now.year, now.month, now.day, 0, 0, 0).isoformat()
         end_of_today = datetime(now.year, now.month, now.day, 23, 59, 59).isoformat()
         
@@ -1339,7 +1342,7 @@ def get_system_dashboard_data():
         
     # Get today's combined schedule
     try:
-        now = datetime.now()
+        now = get_now_ist()
         start_of_today = datetime(now.year, now.month, now.day, 0, 0, 0).isoformat()
         end_of_today = datetime(now.year, now.month, now.day, 23, 59, 59).isoformat()
         cursor_today = db.scheduled_posts.find({
@@ -1592,7 +1595,7 @@ async def publish_now(req: PublishNowRequest):
             
         # 3. Insert/Update schedule entry in MongoDB database as 'Success'
         db = get_mongo_db()
-        created_at = datetime.now().isoformat()
+        created_at = get_now_ist().isoformat()
         
         existing = db.scheduled_posts.find_one({
             "post_id": req.post_id,
@@ -1640,7 +1643,7 @@ async def publish_now(req: PublishNowRequest):
                         cells_to_update.append(gspread.Cell(row=req.row_index, col=col_idx, value="Posted"))
                     if "Post_Date" in headers:
                         col_idx = headers.index("Post_Date") + 1
-                        cells_to_update.append(gspread.Cell(row=req.row_index, col=col_idx, value=datetime.now().isoformat()))
+                        cells_to_update.append(gspread.Cell(row=req.row_index, col=col_idx, value=get_now_ist().isoformat()))
                     
                     # Update columns for Slide_1_URL to Slide_6_URL
                     for i in range(1, 7):
@@ -1677,7 +1680,7 @@ async def publish_now(req: PublishNowRequest):
                     }}
                 )
             else:
-                created_at = datetime.now().isoformat()
+                created_at = get_now_ist().isoformat()
                 db.scheduled_posts.insert_one({
                     "post_id": req.post_id,
                     "topic": req.post_id,
